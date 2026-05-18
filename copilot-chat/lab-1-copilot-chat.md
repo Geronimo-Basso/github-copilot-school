@@ -137,15 +137,15 @@ In short, you can think of Copilot like a very specialized coworker. To be effec
 
    1. Find the comment line that describes adding a student. Above this is where it seems logical to do our registration check.
 
-   1. Enter the below comment and press enter to go to the next line. After a moment, temporary shadow text will appear with a suggestion from Copilot! Nice! :tada:
-
-      Comment:
+   1. Enter the below comment and press enter to go to the next line.
 
       ```python
       # Validate student is not already signed up
       ```
 
-   1. Press `Tab` to accept Copilot's suggestion and convert the shadow text to code.
+   1. After a moment, temporary shadow text will appear with a suggestion from Copilot!
+
+   1. Press `Tab` to accept Copilot's suggestion and convert the shadow text to code. Nice! 🎉
 
    <details>
    <summary>Example Results</summary><br/>
@@ -377,6 +377,16 @@ Instead of jumping straight into edits, it researches your request, asks clarify
 
 Your backend still has zero test coverage. Use **Plan Agent** to create a plan, answer questions, and then launch implementation.
 
+1. Before switching to Plan Agent, open the **Copilot Chat** panel in **Ask Mode** and explore the trade-offs first:
+
+   > ![Static Badge](https://img.shields.io/badge/-Prompt-text?style=social&logo=github%20copilot)
+   >
+   > ```prompt
+   > What are the trade-offs between pytest and unittest for a FastAPI project? Which one would you recommend and why?
+   > ```
+
+   This is a good habit: use Ask Mode to learn before using Plan Mode to architect. You'll write a better prompt when you understand the landscape.
+
 1. Open the **Copilot Chat** panel and switch to **Plan Agent**.
 
 1. Let's start with a broad prompt and Copilot will help us fill in the details:
@@ -387,13 +397,11 @@ Your backend still has zero test coverage. Use **Plan Agent** to create a plan, 
    > I want to add backend FastAPI tests in a separate tests directory.
    > ```
 
-1. Wait for Copilot to generate its first plan. If it asks you any questions, answer them to the best of your ability. 
+1. Wait for Copilot to generate its first plan. If it asks you any questions, answer them to the best of your ability.
 
    > 🪧 **Note:** Don't worry about getting it perfect, you can always refine the plan later.
 
-1. You can refine the plan and provide additional details in follow up prompts
-
-   Here are some examples:
+1. You can refine the plan and provide additional details in follow-up prompts. Here are some examples:
 
    > ![Static Badge](https://img.shields.io/badge/-Prompt-text?style=social&logo=github%20copilot)
    >
@@ -407,8 +415,17 @@ Your backend still has zero test coverage. Use **Plan Agent** to create a plan, 
    > Make sure we use `pytest` and add it to `requirements.txt` file
    > ```
 
+   > ![Static Badge](https://img.shields.io/badge/-Prompt-text?style=social&logo=github%20copilot)
+   >
+   > ```prompt
+   > Make sure we have at least one test for the happy path, one for a 404 (activity not found), and one for the duplicate-signup 400 error
+   > ```
 
-1. Review the proposed plan and when you are happy with it, click **Start implementation** to hand off to **Agent Mode**.
+   > 💡 **Tip:** Notice how each follow-up narrows the plan further — this is the iterative refinement loop that makes Plan Agent so powerful. You can keep going until the plan reads like a specification you'd be happy to hand off to a colleague.
+
+1. Review the proposed plan. Before clicking **Start implementation**, consider copying the plan text and saving it as `TESTING_PLAN.md` in your repo — it doubles as living documentation that explains *why* the tests are structured the way they are.
+
+1. When you are happy with the plan, click **Start implementation** to hand off to **Agent Mode**.
 
    Notice that clicking the button switched from **Plan** to **Agent Mode**. This is your first peek at Agent Mode — we'll explore it in depth in the next step.
 
@@ -419,6 +436,10 @@ Your backend still has zero test coverage. Use **Plan Agent** to create a plan, 
    **🎯 Goal: Get all tests passing (green) before you move on. ✅**
 
    > 🪧 **Note:** Agent Mode may complete this in one pass, or it may need follow-up prompts from you.
+
+> [!NOTE]
+> **Plan Agent vs Agent Mode — when to use which?**
+> Use **Plan Agent** when the task is large, risky, or unclear — you want a reviewed blueprint before any files change. Use **Agent Mode** directly when the task is well-defined and you trust the scope. The Plan → Agent handoff is perfect for situations where you want the speed of automation but the safety of human review.
 
 ## Step 4: Engage Hyperdrive - Copilot Agent Mode 🚀
 
@@ -460,6 +481,29 @@ Because Agent Mode can run tools on your machine (edit files, run terminal comma
 | **Always Allow** | Auto-approves this tool everywhere, across all workspaces. |
 
 You can also open the **Tools** picker in the chat input to enable or disable specific tools, and run **Chat: Reset Tool Confirmations** from the Command Palette to clear previous "Always allow" decisions.
+
+### Activity: Explore built-in tools and discover MCP 🔌
+
+Agent Mode doesn't just write code — it can run terminal commands, read and create files, search your codebase, and more. All of this is powered by **tools**. Let's explore what's already available, then see where MCP fits in.
+
+1. Switch to **Agent Mode** in the Copilot Chat panel, click the **sliders icon** (⊶) in the input box, then select **Tools**.
+
+   A list of built-in tools appears — things like `runInTerminal`, `readFile`, `createFile`, `searchCodebase`, etc. These ship with GitHub Copilot and require no installation.
+
+1. Close the picker and send this prompt to make Copilot use one of those tools immediately:
+
+   > ![Static Badge](https://img.shields.io/badge/-Prompt-text?style=social&logo=github%20copilot)
+   >
+   > ```prompt
+   > What Python packages does this project depend on? Check any requirements or config files.
+   > ```
+
+   Watch Copilot decide on its own to call `readFile` or `searchCodebase` — you'll see each tool call displayed inline before the answer.
+
+   **🎯 Goal: See that Agent Mode is already tool-powered out of the box. ✅**
+
+> [!NOTE]
+> **Where MCP comes in:** the built-in tools cover your local workspace. MCP servers let you plug in external capabilities — fetch live URLs, query a database, call a third-party API — using the exact same mechanism. Browse the [MCP server catalogue](https://github.com/modelcontextprotocol/servers) to see what's available, and add one later via **MCP: Add Server** in the Command Palette.
 
 **Session permission level.** On top of per-tool approvals, each chat session has a **permission level** (set from the permissions picker in the Chat view). It controls how much autonomy the agent has overall:
 
@@ -629,15 +673,29 @@ Use these to hand the prompt to a specialist that knows about a specific tool or
 | `@github` | Questions about a GitHub repo, issues, or pull requests (requires the GitHub Pull Requests extension). |
 | `@azure` | Help with Azure services, deployments, and configuration (requires the Azure extension). |
 
-### Try one
+### Try one — with a real error
 
-Pick any one of the above and run a quick prompt in **Ask Mode**, for example:
+Before using `#terminalLastCommand`, let's create a real (harmless) error so there's something meaningful to debug.
 
-> ![Static Badge](https://img.shields.io/badge/-Prompt-text?style=social&logo=github%20copilot)
->
-> ```prompt
-> #terminalLastCommand why did this fail and how do I fix it?
-> ```
+1. In the terminal, run the app the wrong way — a common beginner mistake:
+
+   ```bash
+   python app/backend/app.py
+   ```
+
+   > 🪧 **Note:** This will fail because the app is served by `uvicorn`, not executed directly. You should see an error like `No module named uvicorn.__main__` or similar. That's intentional!
+
+1. Now open the **Copilot Chat** panel in **Ask Mode** and type:
+
+   > ![Static Badge](https://img.shields.io/badge/-Prompt-text?style=social&logo=github%20copilot)
+   >
+   > ```prompt
+   > #terminalLastCommand why did this fail and how do I fix it?
+   > ```
+
+1. Copilot will read the terminal output and explain both the cause and the correct command to use (`uvicorn`).
+
+   > 💡 **Tip:** This same pattern works any time you hit an unexpected error — instead of copy-pasting the stack trace, just type `#terminalLastCommand` and let Copilot read it directly.
 
 **🎯 Goal: Know that `#`, `/`, and `@` exist, and feel comfortable typing them to discover what's available in your setup. ✅**
 
