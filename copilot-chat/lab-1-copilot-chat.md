@@ -4,17 +4,17 @@ Explore **GitHub Copilot Chat** — your AI pair programmer that lives right ins
 
 ## What You'll Learn
 
-Today's goal will be to learn about GitHub Copilot Chat, the AI-powered UI that GitHub offers, and how to get the most out of the three different modes it provides:
+Today's goal is to learn GitHub Copilot Chat — the AI-powered UI that lives inside your editor — and how to get the most out of every way it lets you collaborate with Copilot:
 
 - **Ask Mode** — Onboard to a project, explore code, and get answers
+- **Inline suggestions & Inline Chat** — Accept full, partial, or next-word completions, and edit code in place with a focused mini-chat
+- **Next Edit Suggestions** — Let Copilot predict and chain your follow-up edits
 - **Plan Agent** — Design an implementation plan before writing any code
 - **Agent Mode** — Let Copilot autonomously fix bugs, add features, and iterate on code
-- **Inline suggestion controls** — Accept the full suggestion, just the next word, or cycle through alternatives
-- **Next Edit Suggestions** — Let Copilot predict and chain your follow-up edits
 - **Model selection** — Choose Auto or a specific language model, and adjust reasoning effort when available
 - **Chat power-ups** — Use `#` context references, `/` slash commands, and `@` chat participants
 
-By the end of this lab you will have used all three modes to fix a bug, add new features, and write tests for a FastAPI web application.
+By the end of this lab you will have used all of the above to fix bugs, add new features, write tests, and ship your work in a FastAPI web application.
 
 ## Step 1: Hello Copilot
 
@@ -347,22 +347,7 @@ In new project developments, it's often helpful to have some realistic looking f
 
 1. You can now go to your website and verify that the new activities are visible.
 
-### Activity: Use Copilot to describe our work 💬 (Optional)
-
-Nice work fixing that bug and expanding the example activities! Now let's get our work committed and pushed to GitHub, again with the help of Copilot!
-
-1. In the left sidebar, select the `Source Control` tab.
-
-   > 💡 **Tip:** Opening a file from the source control area will show the differences to the original rather than simply opening it.
-
-1. Find the `app.py` file and press the `+` sign to collect your changes together in the staging area.
-
-1. Above the list of staged changes, find the **Message** text box, but **don't enter anything** for now.
-   - Typically, you would write a short description of the changes here, but now we have Copilot to help out!
-
-1. To the right of the **Message** text box, find and click the **Generate Commit Message** button (sparkles icon).
-
-1. Press the **Commit** button and **Sync Changes** button to push your changes to GitHub.
+   > 💡 **Tip:** We'll commit and push all of today's changes together at the end of the lab, so don't worry about source control yet.
 
 ## Step 3: Plan your implementation with the Planning Agent 🧭
 
@@ -531,54 +516,43 @@ Let's use Copilot to change the website to display signed up students under each
 
    > 💡 **Tip:** You can accept the changes directly, modify them, or provide additional instruction to refine them using the chat interface.
 
-### Activity: Use Agent mode to add functional "unregister" buttons
+### Activity: Use Agent Mode to fix the live-refresh bug 🐛
 
-Let's experiment with some more open-ended requests that will add more functionality to our web application.
-
-If you don't get the desired results, you can try other models or provide follow-up feedback to refine the results.
+Now that participants are visible on each activity card, you may have noticed something annoying: when a student signs up, the new participant doesn't appear until you manually refresh the page. Let's hand this off to Agent Mode and watch it work across the codebase.
 
 1. Make sure your Copilot is still in **Agent** mode.
 
-1. Click on the **Tools** icon and explore all Tools currently available to Copilot Agent Mode.
+1. Click on the **Tools** icon and explore which tools are currently available to Agent Mode. This is a good moment to see how Copilot decides what it can do on your behalf.
 
-1. Time for our test! Let's ask Copilot to add functionality for removing participants.
+1. Test the registration flow yourself first so you can clearly see the before/after behavior.
 
-   > ![Static Badge](https://img.shields.io/badge/-Prompt-text?style=social&logo=github%20copilot)
-   >
-   > ```prompt
-   > #codebase Please add a delete icon next to each participant and hide the bullet points.
-   > When clicked, it will unregister that participant from the activity.
-   > ```
-
-   The `#codebase` tool is used by Copilot to find relevant files, code chunks that are relevant to the task at hand.
-
-   > 🪧 **Note:** In this lab we explicitly include the `#codebase` tool to get the most repeatable results.
-   > Feel free to try the prompt **without** `#codebase` and observe whether Agent Mode decides to gather broader project context on its own.
-
-1. When Copilot is finished, inspect the code changes and the results on the website. If you like the results, press the **Keep** button. If not, try providing Copilot some feedback to refine the results.
-
-   > 🪧 **Note:** If you don't see updates on the website, you may need to restart the code.
-
-1. Ask Copilot to fix a registration bug.
-
-   > 💡 **Tip:** We recommend testing the registration flow yourself so you can clearly see the before/after changes behavior.
+1. Ask Copilot to fix the bug.
 
    > ![Static Badge](https://img.shields.io/badge/-Prompt-text?style=social&logo=github%20copilot)
    >
    > ```prompt
-   > I've noticed there seems to be a bug.
+   > #codebase I've noticed there seems to be a bug.
    > When a participant is registered, the page must be refreshed to see the change on the activity.
    > ```
 
-1. When Copilot is finished, inspect the results and validate the registration flow on the website.
+   The `#codebase` tool lets Copilot search across your whole workspace for relevant files. We include it explicitly here for repeatable results, but feel free to try the prompt **without** `#codebase` and observe whether Agent Mode gathers project context on its own.
 
-   If you like the results, press the **Keep** button. If not, try providing Copilot some feedback.
+1. When Copilot is finished, inspect the changes and validate the registration flow on the website.
 
-## Step 4.5: Tune Copilot for the task 🛠️
+   If you like the results, press the **Keep** button. If not, provide Copilot some feedback and let it iterate.
 
-Before you fly solo, let's add one more practical skill: choosing how much thinking power Copilot should use.
+   > 🪧 **Note:** If you don't see updates on the website, you may need to restart the backend.
 
-Different tasks need different tradeoffs. A quick syntax question should feel fast. A multi-file refactor, bug investigation, or testing strategy may benefit from a stronger reasoning model or higher thinking effort.
+   **🎯 Goal: Signing up a student should update the participant list immediately, no manual refresh required. ✅**
+
+## Step 5: Tune Copilot for the task 🛠️
+
+Before you fly solo, let's load up your toolbox. So far you've used Copilot mostly with default settings and plain prompts. In this step you'll learn two practical levers you'll want during the solo:
+
+- **Picking the right model and thinking effort** for the task at hand.
+- **Power-ups** — `#`, `/`, and `@` shortcuts that steer the chat with surgical precision.
+
+Keep these in mind — you'll reach for them constantly in the next step.
 
 ### 📖 Theory: Models, Auto, and reasoning effort
 
@@ -606,7 +580,7 @@ Some reasoning models also let you configure **thinking effort**. Higher effort 
 1. Look for a submenu or arrow next to the model name that lets you configure **Thinking Effort**.
 
 
-## Step 4.6: Power-ups — context, slash commands, and chat participants 🧩
+### 🧩 Chat power-ups: context, slash commands, and chat participants
 
 Beyond plain prompts, Copilot Chat understands a few special "shortcuts" you can drop into the input box. They help you point at the right context, trigger a common task, or hand the conversation off to a specialist.
 
@@ -668,7 +642,7 @@ Pick any one of the above and run a quick prompt in **Ask Mode**, for example:
 **🎯 Goal: Know that `#`, `/`, and `@` exist, and feel comfortable typing them to discover what's available in your setup. ✅**
 
 
-## Step 5: Fly Solo — Put It All Together 🧑‍✈️
+## Step 6: Fly Solo — Put It All Together 🧑‍✈️
 
 In the previous steps, we walked through each Copilot mode with guided prompts. Now it's time to take the training wheels off! In this step you will implement new features and improve the codebase using GitHub Copilot as your companion — but **we will not give you the exact prompts**. Think about what you've learned so far and craft your own prompts to get the job done.
 
@@ -688,7 +662,7 @@ Before you dive in, here are some principles to keep in mind when writing your o
 
 ---
 
-### Activity: Replace hardcoded data with a JSON file 📂 (Step 5.1)
+### Activity 6.1: Replace hardcoded data with a JSON file 📂
 
 Currently, all the activity data lives as a hardcoded Python dictionary inside `backend/app.py`. In a real application this data would come from a database, a configuration file, or an external API. For our project, we already have a JSON file waiting at `backend/data/activities.json` — we just need to wire it up!
 
@@ -748,7 +722,7 @@ Now that our data lives in a JSON file, it's much easier to manage. Let's make o
 
 ---
 
-### Activity: Add a withdraw feature 🚪 (Step 5.2)
+### Activity 6.2: Add a withdraw feature 🚪
 
 So far, our app only lets students sign up for activities. But what happens when a student needs to drop an activity due to a scheduling conflict or a last-minute emergency? It would be great to let students withdraw so that another student can take their place.
 
@@ -821,7 +795,7 @@ Before writing any code, let's break down what this feature needs:
 
 ---
 
-### Activity: Document your API with Swagger 📜 (Step 5.3)
+### Activity 6.3: Document your API with Swagger 📜
 
 We've done a lot of work building out our API — we have endpoints for listing activities, signing up, and now withdrawing. But how would another developer know how to use our API? That's where **API documentation** comes in.
 
@@ -908,6 +882,61 @@ Now let's improve the API documentation by adding richer metadata to our endpoin
 
    > 💡 **Tip:** If you find any inconsistencies between the actual API behavior and the documentation, ask Copilot to fix them. This is a common real-world task — keeping docs and code in sync!
 
-## Step 6: Finally commit time
+## Step 7: Ship it — recap, commit, and push 🚢
 
-Ask github copilot chat to do a recap of everything you have done so far, you can commit this if you would like too or just keep it as a personal summary. 
+You've done a lot of work across the backend, the frontend, the tests, and the docs. Let's wrap up the way a real team would: ask Copilot to summarize what changed, then let it write the commit message for us.
+
+### Activity: Ask Copilot for a personal recap
+
+1. Open the **Copilot Chat** panel in **Ask Mode**.
+
+1. Ask Copilot to summarize everything you've done in this session. A good starting prompt:
+
+   > ![Static Badge](https://img.shields.io/badge/-Prompt-text?style=social&logo=github%20copilot)
+   >
+   > ```prompt
+   > #codebase Give me a recap of every change made in this branch compared to main,
+   > grouped by feature (bug fixes, new features, tests, docs).
+   > ```
+
+1. Skim the recap. This is a great moment to catch anything you forgot to test or polish before committing.
+
+### Activity: Let Copilot write your commit message ✍️
+
+Now let's stage and commit everything with Copilot's help — no need to write the message ourselves.
+
+1. In the left sidebar, select the **Source Control** tab.
+
+   > 💡 **Tip:** Opening a file from the source control view shows the diff against the original rather than just opening the file.
+
+1. Review the list of changed files. Press the `+` icon next to each one (or the `+` next to **Changes**) to stage them.
+
+1. Above the staged changes, find the **Message** text box — but **don't type anything yet**.
+
+1. To the right of the **Message** text box, click the **Generate Commit Message** button (the sparkles ✨ icon). Copilot will draft a commit message based on your staged diff.
+
+1. Review the suggested message. Edit it if needed, then press **Commit**.
+
+1. Press **Sync Changes** to push your branch (`accelerate-with-copilot`) to GitHub.
+
+   **🎯 Goal: Your work is on GitHub with a clear, Copilot-generated commit message. ✅**
+
+   > 💡 **Tip:** If your team uses pull requests, this is the perfect moment to open one. You can even ask Copilot in chat to draft the PR description from the same diff.
+
+## Congratulations! 🎉
+
+You've completed **Lab 01**! Here's a recap of what you practiced:
+
+- **Ask Mode** — Used Copilot Chat to onboard to a new project, understand its structure, and recall a forgotten terminal command
+- **Inline suggestions & Inline Chat** — Fixed a duplicate-registration bug with a guided completion and generated sample activity data with Inline Chat
+- **Inline suggestion controls** — Accepted full, partial, and next-word suggestions, and cycled through alternatives
+- **Next Edit Suggestions** — Used `Tab` to chain through Copilot's predicted follow-up edits across the file
+- **Plan Agent** — Designed a backend testing strategy collaboratively before handing implementation off to Agent Mode
+- **Agent Mode** — Let Copilot autonomously add a participants display and fix a live-refresh bug across multiple files
+- **Model selection** — Compared Auto with a specific reasoning model and adjusted thinking effort when available
+- **Chat power-ups** — Explored `#` context references, `/` slash commands, and `@` chat participants
+- **Fly Solo** — Crafted your own prompts to move data into JSON, build a full-stack withdraw feature, and enrich the Swagger/OpenAPI docs
+- **Ship it** — Got a Copilot-generated recap, used **Generate Commit Message** to stage and commit your work, and pushed to GitHub
+
+You're now equipped to use every Copilot Chat surface in your daily workflow. Head over to the other labs in this repository to keep exploring!
+
