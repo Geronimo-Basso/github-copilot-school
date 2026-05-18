@@ -45,7 +45,7 @@ As you work, you'll find GitHub Copilot can help out in several places across th
 
 ### Activity: Get a project intro from Copilot Chat
 
-Let's start up our development environment, use copilot to learn a bit about the project, and then give it a test run.
+Let's start up our development environment, use Copilot to learn a bit about the project, and then give it a test run.
 
 1. Start by cloning this repository into your local machine.
 
@@ -66,15 +66,15 @@ Let's start up our development environment, use copilot to learn a bit about the
    > What should I do to run it?
    > ```
 
-   Now add the src folder as a context and repeat the same question. 
+   Now add the app folder as a context and repeat the same question. 
 
-   Also, you can use the #codespace, that will allow copilot to see the whole repo content and its codebase.
+   Also, you can use the #codespace, that will allow Copilot to see the whole repo content and its codebase.
 
 1. Now that we know a bit more about the project, let's actually try running it!
 
 ### Activity: Use Copilot to help remember a terminal command 🙋
 
-Great work! Now that we are familiar with the app and we know it works, let's ask copilot for help starting a branch so we can do some customizing.
+Great work! Now that we are familiar with the app and we know it works, let's ask Copilot for help starting a branch so we can do some customizing.
 
 1. In VS Code's bottom panel, select the **Terminal** tab and on the right side click the plus `+` sign to create a new terminal window.
 
@@ -911,19 +911,3 @@ Now let's improve the API documentation by adding richer metadata to our endpoin
 ## Step 6: Finally commit time
 
 Ask github copilot chat to do a recap of everything you have done so far, you can commit this if you would like too or just keep it as a personal summary. 
-
-## Congratulations! 🎉
-
-You've completed Lab 02! Here's a recap of what you learned:
-
-- **Ask Mode** — Used Copilot Chat to onboard to a new project, understand its structure, and recall terminal commands
-- **Inline Suggestions & Inline Chat** — Fixed a duplicate-registration bug with code completions and generated sample data using inline chat
-- **Plan Agent** — Designed a testing strategy collaboratively before handing off implementation to Agent Mode
-- **Agent Mode** — Let Copilot autonomously add a participants display, unregister buttons, and fix a UI refresh bug across multiple files
-- **Inline suggestion controls** — Accepted full, partial, and next-word suggestions, and cycled through alternatives
-- **Next Edit Suggestions** — Used `Tab` to chain through Copilot's predicted follow-up edits across the file
-- **Model selection** — Compared Auto with a specific model and adjusted thinking effort when available
-- **Chat power-ups** — Explored `#` context references, `/` slash commands, and `@` chat participants
-
-You're now equipped to use all three Copilot Chat modes in your daily workflow. Head over to the other labs in this repository to keep exploring!
-
