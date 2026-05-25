@@ -1,6 +1,6 @@
-# Lab 02 — Copilot Custom Instructions
+# Lab 02 — Customizing GitHub Copilot
 
-Teach **GitHub Copilot** to speak your project's language. Custom instructions, path-specific rules, reusable prompt files, custom agents, and agent skills turn Copilot from a generic assistant into a domain expert that knows your conventions by heart.
+Teach **GitHub Copilot** to speak your project's language. Custom instructions, path-specific rules, reusable prompt files, custom agents, agent skills, MCP servers, and plugins turn Copilot from a generic assistant into a domain expert that knows your conventions by heart.
 
 ## Table of Contents
 
@@ -12,6 +12,8 @@ Teach **GitHub Copilot** to speak your project's language. Custom instructions, 
 - [Phase 2: Reusable Prompt Files](#phase-2-reusable-prompt-files)
 - [Phase 3: Custom Agents](#phase-3-custom-agents)
 - [Phase 4: Agent Skills](#phase-4-agent-skills)
+- [Phase 5: Model Context Protocol (MCP)](#phase-5-model-context-protocol-mcp)
+- [Phase 6: Plugins](#phase-6-plugins)
 - [Congratulations! 🎉](#congratulations-)
 
 ## What You'll Learn
@@ -23,8 +25,10 @@ Today's goal is to learn how to **customize GitHub Copilot's behavior** so its o
 - **Prompt Files** — Build reusable slash commands that automate multi-step workflows
 - **Custom Agents** — Define reusable personas with their own instructions, tool restrictions, and handoffs
 - **Agent Skills** — Package domain expertise so Copilot writes better code in specialized areas
+- **Model Context Protocol (MCP)** — Expose data and capabilities to Copilot via standardized server processes
+- **Plugins** — Bundle agents, MCP servers, and skills into a single shareable, installable package
 
-By the end of this lab you will have set up custom instructions at every scope, fixed non-compliant content in your activities data, built a prompt file to automate adding new activities, defined a pair of custom agents that hand off work to each other, and created an agent skill that layers expert defaults on top of that prompt — all on the FastAPI school activities website from Lab 01. ♟️ ⚽️ 🎻
+By the end of this lab you will have set up custom instructions at every scope, fixed non-compliant content in your activities data, built a prompt file to automate adding new activities, defined a pair of custom agents that hand off work to each other, created an agent skill that layers expert defaults on top of that prompt, written your own MCP server that exposes the school activities to Copilot, and packaged everything as a distributable plugin — all on the FastAPI school activities website from Lab 01. ♟️ ⚽️ 🎻
 
 ## Setup
 
@@ -417,7 +421,7 @@ The school portal could automate more than activity creation. Try writing **one*
 
 ## Phase 3: Custom Agents
 
-So far you've taught Copilot the project's rules (instructions), automated repeatable workflows (prompt files), and you're about to give it expert defaults (agent skills). But every time you start a chat you still pick the model, allow or restrict tools, and re-explain the persona you want. **Custom agents** bundle all of that — instructions, allowed tools, model preference, and even handoffs to other agents — into a single selectable persona.
+So far you've taught Copilot the project's rules (instructions), automated repeatable workflows (prompt files), and you're about to install on-demand expertise (agent skills). But every time you start a chat you still pick the model, allow or restrict tools, and re-explain the persona you want. **Custom agents** bundle all of that — instructions, allowed tools, model preference, and even handoffs to other agents — into a single selectable persona.
 
 In this phase you'll build two agents that work together: an `activities-planner` that can only **read** the codebase and propose a plan, and an `activities-implementer` that picks up that plan and actually edits `activities.json`.
 
@@ -439,7 +443,7 @@ Here's how custom agents relate to what you've already built:
 | **Instructions** | *How* should things be done? | "Activity names must be Title Case" |
 | **Prompt files** | *What* repeatable task should run? | `/new-activity` appends an entry |
 | **Custom agents** | *Who* is doing the work, and *with which tools*? | `activities-planner` (read-only) vs `activities-implementer` (edits files) |
-| **Agent Skills** | What *expertise* should I apply? | "Default `max_participants` to 20" |
+| **Agent Skills** | What *expertise* should I apply, only when relevant? | The `pdf` skill loads only when the task involves PDFs |
 
 **Key frontmatter fields:**
 
@@ -565,126 +569,487 @@ This agent takes a plan and applies it to `activities.json`, reusing the `/new-a
 
 > 🪧 **Note:** Custom agents in VS Code can do much more — scoped hooks, MCP servers, cloud (`target: github-copilot`) execution, and self-referential subagents. See the [official documentation](https://code.visualstudio.com/docs/copilot/customization/custom-agents) for the full picture.
 
-Next, you'll layer **expert defaults** on top of everything you've built with **Agent Skills**.
+Next, you'll install on-demand domain expertise with **Agent Skills**.
 
 ---
 
 ## Phase 4: Agent Skills
 
-You've customized how Copilot understands your project, automated content creation, and defined reusable personas. But what about the **defaults** Copilot uses when the user is vague? Right now, `/new-activity` asks for every field — that's safe, but for *most* clubs the school's defaults would do.
+So far you've taught Copilot about your project (instructions), automated workflows (prompt files), and defined personas (custom agents). All of these are **always-on** — they're injected into every request that matches their scope. But what about specialized expertise you only need occasionally? Generating a PDF, calling a payments API, debugging a memory dump? Loading that kind of knowledge into every prompt would burn context for no reason.
 
-That's where **Agent Skills** come in. An agent skill is a small file of **expert knowledge** that Copilot reads before acting — like giving it a cheat-sheet from a senior teacher who knows what the school usually wants.
+That's the niche **Agent Skills** fill: bundles of **expert knowledge plus supporting files** that Copilot loads **only when the task calls for them**.
 
 ### 📖 Theory: What are Agent Skills?
 
-An agent skill is a `SKILL.md` file that gives Copilot domain expertise. While instructions say "follow these rules" and prompts say "do this task", an agent skill says **"here is how an expert does it — apply this knowledge."**
+An agent skill is a folder containing a `SKILL.md` file (and optionally helper docs, scripts, or templates). Copilot reads each skill's frontmatter at startup, and at request time it decides — based on the skill's `description` and your prompt — whether to pull the rest of the skill into context.
 
 | Aspect | Details |
 | ------ | ------- |
-| **File name** | `SKILL.md` |
-| **Location** | Inside a folder under `.github/skills/` |
-| **Frontmatter** | `name` and `description` — tells Copilot when to use it |
-| **Content** | Best practices, defaults, and do's/don'ts |
+| **File name** | `SKILL.md` (one per skill, inside its own folder) |
+| **Discovery locations** | `.github/skills/<name>/` (workspace), `~/.copilot/skills/<name>/` (user), or inside a plugin's `skills/` folder |
+| **Frontmatter** | `name` and `description` (required). `license` and others are optional |
+| **Content** | Markdown — best practices, code samples, decision trees, do's/don'ts |
+| **Bundled assets** | Reference docs (`reference.md`, `forms.md`), runnable `scripts/`, templates — anything the skill author wants Copilot to read or execute |
+| **Loaded when** | Copilot judges the user's task matches the skill's `description` |
 
-> 💡 **Tip:** Keep agent skills focused on one area. A small, specific agent skill is more useful than a massive generic one.
+#### How skills differ from everything else you've built
 
-> ❕ **Important:** The `description` field in the frontmatter is **the most critical part** of an agent skill. Copilot reads it to decide whether to load the agent skill for a given task. If the description doesn't mention the right keywords (e.g., "activity", "create", "school"), Copilot won't know when to apply it — and your agent skill will be ignored. Make the description specific and include the key terms that match the kind of tasks you want the agent skill to activate for.
+| Customization | When it activates | Best for |
+| ------------- | ----------------- | -------- |
+| **Repository instructions** | Every request in the repo | Project-wide conventions |
+| **Path-specific instructions** | Files matching `applyTo` glob | Format rules for a specific area |
+| **Prompt files** | User invokes `/name` explicitly | Repeatable workflows the user triggers |
+| **Custom agents** | User picks the agent from the dropdown | Persistent persona + tool restrictions |
+| **Agent skills** | Copilot auto-loads when task matches `description` | Specialized expertise that's only sometimes relevant |
 
-See the [VS Code Docs: Agent Skills](https://code.visualstudio.com/docs/copilot/customization/agent-skills) page for more information.
+#### Progressive disclosure: the killer feature
 
-#### Agent Skills Can Reference Other Files
+A skill can be huge — Anthropic's official `pdf` skill includes `SKILL.md`, `reference.md`, `forms.md`, and a `scripts/` directory totaling thousands of lines. None of that consumes context until you ask a PDF-related question. When you do, Copilot reads `SKILL.md` (the entry point), and `SKILL.md` itself tells Copilot when to read the deeper files (e.g., "If the user needs to fill out a PDF form, read FORMS.md"). This is called **progressive disclosure** and it's why skills scale where instructions can't.
 
-Inside a `SKILL.md` file, you can link to other files in your workspace using regular markdown links — just like prompt files do. When Copilot loads the agent skill, it also reads the linked files for additional context.
+> ❕ **Important:** The `description` is **the most critical field**. Copilot uses it to decide whether to load the skill. Be specific and include keywords matching the tasks you want to trigger on. A vague description means the skill never activates.
 
-This is powerful because it lets you **reuse** the prompt files you already built. For example, an agent skill can say: "When creating activities, follow the workflow in the `new-activity` prompt file, but also apply these extra defaults."
+> 💡 **Tip:** Skills can reference other workspace files via plain markdown links, and they can include executable `scripts/` that Copilot can invoke through the terminal. That's what lets a skill go beyond "extra instructions" into "domain capability."
 
-### Activity: Create the activity-creation agent skill 🧑‍🏫
+See the [VS Code Docs: Agent Skills](https://code.visualstudio.com/docs/copilot/customization/agent-skills) page for the full reference, and browse [`github.com/anthropics/skills`](https://github.com/anthropics/skills) for production-quality examples.
 
-Let's build an agent skill that layers school-specific defaults on top of the `/new-activity` prompt file from Phase 2.
+### Activity: Install the Anthropic PDF skill 📥
 
-1. Create the agent skill file:
+Rather than write a skill from scratch, let's **install a real one** — Anthropic's `pdf` skill — and use it to generate a PDF directly from `activities.json`. This mirrors how most teams will consume skills in practice: pick one off the shelf, drop it into the right folder, done.
+
+1. **Download the skill** from the [`anthropics/skills`](https://github.com/anthropics/skills/tree/main/skills/pdf) repo. The fastest way is to clone the repo into a temp folder and copy just the `pdf/` directory:
+
+   ```bash
+   git clone --depth 1 https://github.com/anthropics/skills.git /tmp/anthropics-skills
+   mkdir -p .github/skills
+   cp -r /tmp/anthropics-skills/skills/pdf .github/skills/pdf
+   ```
+
+   > 🪧 **License note:** The Anthropic PDF skill is shipped under its own `LICENSE.txt` (see the file inside the skill folder). Review it before redistributing the skill outside your own use.
+
+2. **Verify the final layout** matches:
 
    ```text
-   .github/skills/activity-creation/SKILL.md
+   .github/skills/pdf/
+   ├── LICENSE.txt
+   ├── SKILL.md
+   ├── forms.md
+   ├── reference.md
+   └── scripts/
    ```
 
-2. Fill in the placeholders (`##`, `enter-prompt-file-name`, `enter-path-to-prompt-file`) below with the correct agent skill name, description, and **relative path** to your prompt file:
+3. **Install the Python libraries** the skill relies on so Copilot can actually run the code it suggests:
 
-   ```markdown
-   ---
-   name: ##
-   description: '##. Use when ##'
-   ---
-
-   # Activity Creation Agent Skill
-
-   When creating new activities, follow the workflow in
-   [enter-prompt-file-name](enter-path-to-prompt-file) but apply
-   these school defaults and rules:
-
-   ## Defaults
-
-   - If the user does not specify `max_participants`, default to **20**.
-   - If the user does not specify a schedule, default to **`"Fridays, 3:30 PM - 5:00 PM"`**.
-
-   ## Required Information
-
-   - **Activity name**
-   - **Description** (at least one full sentence)
-   - If either of these is missing, do **NOT** proceed. Ask the user to provide them before creating anything.
-
-   ## Validation
-
-   - The activity name must be in Title Case.
-   - The description must be at least 10 words.
-   - `participants` must always start as an empty array.
+   ```bash
+   pip install reportlab pypdf pdfplumber
    ```
 
-   > 🚧 **Note:** Notice how the agent skill **links to the prompt file** instead of repeating its workflow. Copilot follows the prompt file's steps (gather info, append to JSON) while also applying the defaults and validation from the agent skill.
+4. **Restart VS Code** (or reload the window) so Copilot picks up the new skill.
 
-3. Save the file.
+5. **Confirm the skill is loaded.** Open the Command Palette → **`Chat: Diagnostics`**. Under the skills list you should see `pdf` with the path `.github/skills/pdf/SKILL.md`.
 
-### Activity: See the agent skill in action 🚀
+### Activity: Generate a PDF roster from activities.json 📄
+
+Now let's put the skill to work on real project data.
 
 1. Open **Copilot Chat** in **Agent** mode.
 
-2. Ask Copilot to create a new activity without specifying every field:
+2. Ask Copilot to generate a one-page PDF roster for a single activity:
 
    > ![Static Badge](https://img.shields.io/badge/-Prompt-text?style=social&logo=github%20copilot)
    >
    > ```prompt
-   > Create a new astronomy club activity where students learn about
-   > constellations and use the school telescope.
+   > Read app/backend/data/activities.json and generate a one-page PDF roster
+   > for "Chess Club" at output/chess-club-roster.pdf. Include the activity
+   > name as the title, the description, the schedule, max participants,
+   > and the list of currently signed-up student emails. Make it look like
+   > something a teacher would actually print.
    ```
 
-3. Observe how Copilot behaves with the agent skill active:
+3. Watch Copilot's response. You should see it:
 
-   - It should **not** ask for `max_participants` (the agent skill defaults to 20).
-   - It should **not** ask for a schedule (the agent skill defaults to `"Fridays, 3:30 PM - 5:00 PM"`).
-   - It should follow the same workflow from the prompt file (append to `activities.json`, init `participants: []`).
-   - The new entry should respect every path-specific rule from Step 2.
+   - Reference the `pdf` skill in its tool/skill usage indicators.
+   - Read `app/backend/data/activities.json`.
+   - Write a short Python script that uses `reportlab` (the library `SKILL.md` recommends for creating PDFs) and run it.
+   - Produce `output/chess-club-roster.pdf`.
 
-4. Refresh the browser and verify the new activity appears with the expected defaults.
+4. Open the resulting PDF. You should have a real, printable roster — generated end-to-end by Copilot using the skill's expertise.
 
-   **🎯 Goal: The agent skill combines the `/new-activity` prompt workflow with school-specific defaults and validation — showing that agent skills can reference and extend existing files. ✅**
+   **🎯 Goal: A real PDF file is generated from `activities.json` by Copilot, using the `pdf` skill's bundled knowledge without you writing any PDF code. ✅**
+
+### Activity: Push the skill further 🚀
+
+Skills shine when one prompt triggers multiple techniques from the bundled knowledge. Try one of these:
+
+- **Bulk generation:** *"Generate a one-page roster PDF for every activity in `activities.json`, saved under `output/rosters/`."*
+- **Merged handbook:** *"Generate a single multi-page PDF handbook at `output/activities-handbook.pdf` with a cover page, table of contents, and one page per activity."* (Exercises both `reportlab` for creation and `pypdf` for merging.)
+- **Read-back:** *"Extract the text from `output/activities-handbook.pdf` and list every activity name you find."* (Exercises `pdfplumber` for extraction — proves the skill covers both produce and consume.)
+
+Notice how the **same skill** powers all three tasks because `SKILL.md` documents *when* to reach for which library.
 
 <details>
-<summary>Agent Skill not being applied? 🤷</summary>
+<summary>Skill not being applied? 🤷</summary>
 
-- Make sure the file is at exactly `.github/skills/activity-creation/SKILL.md`.
-- The `description` in the frontmatter must mention keywords like `activity`, `create`, `school` so Copilot knows when to load it.
-- Check that the relative path to the prompt file is correct (typically `../../prompts/new-activity.prompt.md`).
-- Restart VS Code if the agent skill was just created.
+- Confirm the path is exactly `.github/skills/pdf/SKILL.md` at the workspace root.
+- Run **`Chat: Diagnostics`** from the Command Palette — the `pdf` skill should be listed.
+- If Copilot writes PDF code but ignores the skill's guidance, mention PDFs more explicitly in your prompt (the `description` triggers on PDF-related keywords).
+- Restart VS Code if you just copied the skill in.
 
 </details>
 
-> 💡 **Agents, prompt files, or skills?** Use custom agents when you need a persistent persona with specific tool restrictions, model preferences, or handoffs between roles. For one-off tasks that don't need tool restrictions, use [prompt files](https://code.visualstudio.com/docs/copilot/customization/prompt-files). For portable, reusable capabilities with scripts and resources, use [agent skills](https://code.visualstudio.com/docs/copilot/customization/agent-skills).
+> 💡 **Instructions, prompt files, agents, or skills?** Use **instructions** for rules that should always apply. Use **prompt files** for repeatable workflows the user explicitly triggers. Use **custom agents** for personas with specific tool restrictions or handoffs. Use **skills** for specialized expertise — including bundled scripts and reference docs — that should only load when the task calls for it.
+
+Next, you'll break out of Copilot's text-only world and let it call **real tools** against your project data with **MCP**.
+
+---
+
+## Phase 5: Model Context Protocol (MCP)
+
+Up to now, every customization you built (instructions, prompt files, agents, skills) lives **inside Copilot's world** — it's text the model reads. But what if you want Copilot to do something it physically cannot do on its own? Read a live database. Query an internal API. Compute statistics from data it can't see in the editor.
+
+That's where **MCP** comes in.
+
+### 📖 Theory: What is MCP?
+
+**Model Context Protocol (MCP)** is "USB-C for AI tools" — a standard way for an AI client (Copilot Agent) to talk to a server process that exposes **tools**, **resources**, and **prompts**.
+
+```text
+┌──────────────┐      MCP       ┌──────────────────────┐
+│ Copilot Chat │  ◀──────────▶  │ MCP Server           │
+│  (client)    │   stdio/JSON   │ list_activities()    │
+└──────────────┘                │ get_signups_count()  │
+                                └──────────────────────┘
+```
+
+Two properties worth internalizing:
+
+- **Each MCP server runs as a separate process.** That's the security boundary. Copilot can't accidentally read your filesystem because of an MCP bug — only what the server explicitly exposes.
+- **You register servers in `.vscode/mcp.json`.** VS Code launches them on demand, you accept a trust prompt the first time, and the tools show up in **Configure Tools** in the chat input.
+
+> 💡 **Tip:** You can also browse a registry of community MCP servers at [`github.com/mcp`](https://github.com/mcp) — GitHub, Postgres, Sentry, Playwright, Microsoft Learn, and many more.
+
+### Activity: Build your own MCP server 🛠️
+
+You're going to expose the school activities (the same data that powers the website) as an MCP server, so that Copilot can answer questions like *"which activity is closest to full?"* by calling real tools instead of guessing.
+
+1. **Install the MCP Python SDK** into your virtual environment:
+
+   ```bash
+   pip install "mcp[cli]>=1.0"
+   ```
+
+2. **Create the server directory at the workspace root** (not inside `app/`):
+
+   ```bash
+   mkdir -p mcp_servers
+   touch mcp_servers/__init__.py
+   ```
+
+3. **Create the server file at `mcp_servers/school_activities_server.py`.** You can write it yourself or ask Copilot in **Agent** mode:
+
+   > ![Static Badge](https://img.shields.io/badge/-Prompt-text?style=social&logo=github%20copilot)
+   >
+   > ```prompt
+   > Create mcp_servers/school_activities_server.py — a FastMCP Python server
+   > named "school-activities" that reads app/backend/data/activities.json
+   > and exposes two tools:
+   >  - list_activities() -> list[str]: return the activity names
+   >  - get_signups_count(activity: str) -> int: return how many students
+   >    have signed up for that activity. Raise ValueError if unknown.
+   > Run the server with mcp.run() under `if __name__ == "__main__"`.
+   > Use pathlib to resolve activities.json relative to the workspace root.
+   > ```
+
+   The result should look similar to:
+
+   <details>
+   <summary>Expected content 📄</summary>
+
+   ```python
+   """School activities MCP server — exposes the activities data file to
+   MCP-aware clients (e.g., GitHub Copilot Agent Mode)."""
+
+   import json
+   from pathlib import Path
+
+   from mcp.server.fastmcp import FastMCP
+
+   ACTIVITIES_FILE = (
+       Path(__file__).resolve().parent.parent
+       / "app" / "backend" / "data" / "activities.json"
+   )
+
+   mcp = FastMCP("school-activities")
+
+
+   def _load() -> dict:
+       with open(ACTIVITIES_FILE, "r", encoding="utf-8") as f:
+           return json.load(f)
+
+
+   @mcp.tool()
+   def list_activities() -> list[str]:
+       """Return the names of all extracurricular activities."""
+       return list(_load().keys())
+
+
+   @mcp.tool()
+   def get_signups_count(activity: str) -> int:
+       """Return the number of students signed up for a given activity.
+
+       Raises ValueError if the activity is unknown.
+       """
+       data = _load()
+       if activity not in data:
+           raise ValueError(f"Unknown activity: {activity!r}")
+       return len(data[activity].get("participants", []))
+
+
+   if __name__ == "__main__":
+       mcp.run()
+   ```
+
+   </details>
+
+   > 💡 **Tip:** The docstrings on each `@mcp.tool()` are how Copilot decides when to call them. Keep them short, specific, and accurate — they earn their keep.
+
+4. **Register the server in `.vscode/mcp.json`** (create the file if it doesn't exist). Ask Copilot to do it, or paste:
+
+   ```jsonc
+   {
+     "servers": {
+       "school-activities": {
+         "type": "stdio",
+         "command": "${workspaceFolder}/venv/bin/python",
+         "args": ["-m", "mcp_servers.school_activities_server"]
+       }
+     }
+   }
+   ```
+
+   > 🪟 **Windows:** change `"command"` to `"${workspaceFolder}/venv/Scripts/python.exe"`. Everything else is identical.
+
+5. **Start the server.** Open the Command Palette → **MCP: List Servers** → select `school-activities` → **Start Server**. Accept the trust prompt the first time.
+
+6. **Verify the tools are wired up.** Open **Configure Tools** in the chat input. You should see `list_activities` and `get_signups_count` listed under `school-activities`.
+
+### Activity: Drive the MCP server with prompts 🎯
+
+1. **Single tool call:**
+
+   > ![Static Badge](https://img.shields.io/badge/-Prompt-text?style=social&logo=github%20copilot)
+   >
+   > ```prompt
+   > Use the school-activities MCP server to list all activities.
+   > ```
+
+   Copilot should call `list_activities()` once and return the names.
+
+2. **Chained tool calls — the aha moment:**
+
+   > ![Static Badge](https://img.shields.io/badge/-Prompt-text?style=social&logo=github%20copilot)
+   >
+   > ```prompt
+   > Which activity is closest to full? Use the school-activities MCP server.
+   > ```
+
+   To answer, Copilot must call `list_activities()` once, then `get_signups_count(...)` for each result, then compare against `max_participants` (which it can see by reading `activities.json`). The full chain of tool calls is visible inline in the transcript.
+
+3. **Negative case — see a tool error surface gracefully:**
+
+   > ![Static Badge](https://img.shields.io/badge/-Prompt-text?style=social&logo=github%20copilot)
+   >
+   > ```prompt
+   > Get the signup count for "Knitting Club" using the school-activities MCP.
+   > ```
+
+   `Knitting Club` doesn't exist; the tool raises `ValueError`; Copilot reports it gracefully (and may suggest calling `list_activities()` first).
+
+**🎯 Goal: The chat transcript shows real MCP tool calls in order, and Copilot's final answer is grounded in the data your server exposed — not invented. ✅**
+
+<details>
+<summary>Server not starting? 🤷</summary>
+
+- Make sure `mcp[cli]>=1.0` is installed in the same venv your `.vscode/mcp.json` `command` points to.
+- Try running the server manually from the workspace root: `python -m mcp_servers.school_activities_server`. If it errors out, fix the error first.
+- Check that `app/backend/data/activities.json` exists and is valid JSON.
+- Restart VS Code if the server was just registered.
+
+</details>
+
+### Activity (optional): Consume an off-the-shelf MCP from a registry 🌐
+
+Building your own MCP is the load-bearing skill — but most teams will spend more time **consuming** community MCPs than authoring them. The **Microsoft Learn MCP** is a great example: it gives Copilot grounded access to official Microsoft documentation.
+
+1. Install the Microsoft Learn MCP following the upstream instructions on the [MCP registry](https://github.com/mcp). For VS Code this is typically a one-click install that adds an entry to `.vscode/mcp.json`.
+
+2. Verify it's running (**MCP: List Servers**), then try:
+
+   > ![Static Badge](https://img.shields.io/badge/-Prompt-text?style=social&logo=github%20copilot)
+   >
+   > ```prompt
+   > Search Microsoft docs and explain how MCP works in GitHub Copilot.
+   > Cite the exact learn.microsoft.com URLs you used.
+   > ```
+
+   Copilot fetches real documentation pages and cites them — answers are grounded in source material, not just training data.
+
+> 🪧 **Note:** The MCP world is large. We only covered **tools** today; MCP also supports **resources** (files/URIs the model can read) and **prompts** (reusable prompt templates the server exposes). Browse the [MCP registry](https://github.com/mcp) for hundreds of community servers — GitHub, Postgres, Sentry, Playwright, and more.
+
+---
+
+## Phase 6: Plugins
+
+You've now built a small toolbox of customizations: a path-specific instruction file, a prompt file, two custom agents, an agent skill, and an MCP server. Each one lives in a different folder under `.github/`, `.vscode/`, or `mcp_servers/`. That's fine for your own workspace — but how do you **share** all of it with a teammate?
+
+That's what **plugins** are for: a single directory that bundles all of these customizations into one distributable package.
+
+### 📖 Theory: What are Plugins?
+
+VS Code Copilot plugins are **bundles** that can include any combination of:
+
+1. **Slash commands** — custom `/` commands in chat
+2. **Agent skills** — on-demand instructions and scripts
+3. **Custom agents** — the `.agent.md` files you created in Phase 3
+4. **Hooks** — shell commands that fire at agent lifecycle points
+5. **MCP servers** — the `.mcp.json` entries you built in Phase 5
+
+You already built pieces #3 and #5 individually. Plugins wrap them for **distribution and discovery**.
+
+**Standard plugin directory layout:**
+
+```text
+my-plugin/
+├── plugin.json              # Required — plugin identity and pointers
+├── agents/
+│   └── reviewer.agent.md    # Custom agents go here
+├── skills/
+│   └── tester/
+│       └── SKILL.md         # Agent skills go here
+├── hooks.json               # Hook configuration (optional)
+└── .mcp.json                # MCP server definitions (optional)
+```
+
+**The `plugin.json` manifest** has these fields:
+
+| Field | Required | Purpose |
+| ----- | -------- | ------- |
+| `name` | ✅ | Kebab-case identifier. Only lowercase letters, numbers, and hyphens. **No slashes or colons** — invalid names silently fail to load. |
+| `description` | | Brief description (max 1024 chars) |
+| `version` | | Semantic version (e.g., `1.0.0`) |
+| `author` | | Object with `name` (required), `email`, `url` |
+| `agents` | | Path to agent directory (defaults to `agents/`) |
+| `skills` | | Path to skill directory (defaults to `skills/`) |
+| `mcpServers` | | Path to MCP config file or inline definitions |
+| `hooks` | | Path to hooks config file or inline hooks object |
+
+> ⚠️ **Plugins are in preview.** They are gated by the `chat.plugins.enabled` setting, which is often **managed at the organization level**. If it's grayed out in your VS Code settings, contact your admin.
+
+> 🪧 **Security note:** Plugins can contain hooks and MCP servers that execute code. Always review the contents of a plugin before installing.
+
+### Activity: Package your work as a plugin 📦
+
+You'll bundle the **`activities-implementer`** custom agent (from Phase 3) and the **`school-activities`** MCP server (from Phase 5) into a single `my-school-plugin/` directory.
+
+1. **Create the plugin root** at the workspace root:
+
+   ```bash
+   mkdir my-school-plugin
+   ```
+
+2. **Create `my-school-plugin/plugin.json`** with the manifest:
+
+   ```json
+   {
+     "name": "my-school-plugin",
+     "description": "Activities implementer agent and school-activities MCP server for the GitHub Copilot High School app",
+     "version": "0.1.0",
+     "author": {
+       "name": "Your Name"
+     },
+     "agents": "agents/",
+     "mcpServers": ".mcp.json"
+   }
+   ```
+
+3. **Copy the custom agent into the plugin:**
+
+   ```bash
+   mkdir my-school-plugin/agents
+   cp .github/agents/activities-implementer.agent.md \
+      my-school-plugin/agents/activities-implementer.agent.md
+   ```
+
+   > 💡 **Note:** You're moving a copy of the agent from Phase 3 into the plugin structure. The file stays identical — same frontmatter, same system prompt.
+
+4. **Create `my-school-plugin/.mcp.json`** to reference the MCP server you built in Phase 5:
+
+   ```json
+   {
+     "mcpServers": {
+       "school-activities": {
+         "type": "stdio",
+         "command": "python",
+         "args": ["-m", "mcp_servers.school_activities_server"]
+       }
+     }
+   }
+   ```
+
+   > 🪧 **Key differences from `.vscode/mcp.json`:**
+   >
+   > - Top-level key is `mcpServers` (not `servers`).
+   > - `command` is simply `"python"` (not an absolute venv path). In a real distributed plugin you'd either bundle a runtime, document a Python version requirement, or use `npx` for a JavaScript MCP server. For this lab, assume the user has Python in their PATH.
+
+**🎯 Goal: A self-contained `my-school-plugin/` directory at the workspace root with a valid `plugin.json` manifest, the custom agent inside `agents/`, and the MCP server definition in `.mcp.json`. ✅**
+
+### Install & verify (read-through) 🔍
+
+> 📖 **Read-through** — how VS Code would discover and load your plugin.
+
+Plugins are in preview and the local-install flow is fiddly. Here's what the path looks like end-to-end so you know where this is going.
+
+**Enabling plugin support.** Add to `.vscode/settings.json`:
+
+```json
+{
+  "chat.plugins.enabled": true
+}
+```
+
+If this setting is grayed out, your org admin controls it.
+
+**Registering the plugin path for local development:**
+
+```json
+{
+  "chat.pluginLocations": {
+    "${workspaceFolder}/my-school-plugin": true
+  }
+}
+```
+
+**What you'd see after reloading the window:**
+
+1. The `activities-implementer` agent shows up in the agent picker.
+2. **MCP: List Servers** lists `school-activities` (auto-started by the plugin).
+3. `list_activities` and `get_signups_count` appear in **Configure Tools**.
+
+**Where this is going (production):**
+
+In production you'd publish the plugin to a Git repository and share it via:
+
+- **Plugin marketplaces** — e.g., [`github/awesome-copilot`](https://github.com/github/awesome-copilot). Users browse and install from the **Agent Plugins** view in the Extensions sidebar.
+- **Direct Git URL** — users install with **Chat: Install Plugin From Source** from the Command Palette.
+
+Local `chat.pluginLocations` is mostly for development and testing — once your plugin is ready, you push it to a Git repo and share the URL.
+
+**🎯 Goal: You understand how plugins bundle agents + MCP servers + skills + hooks into a single distributable package, what the `plugin.json` manifest looks like, and how VS Code discovers and loads them. ✅**
 
 ---
 
 ## Congratulations! 🎉
 
-You've completed **Lab 02 — Copilot Custom Instructions**! Here's a recap of what you learned:
+You've completed **Lab 02 — Customizing GitHub Copilot**! Here's a recap of what you learned:
 
 | Phase | What You Did |
 | ----- | ------------ |
@@ -692,7 +1057,9 @@ You've completed **Lab 02 — Copilot Custom Instructions**! Here's a recap of w
 | **Phase 1 · Step 2** | Built path-specific custom instructions for `app/backend/data/**/*.json` and used them to clean and fix activity entries |
 | **Phase 2** | Created a reusable prompt file (`/new-activity`) to automate adding new activities |
 | **Phase 3** | Defined two custom agents (`activities-planner` read-only and `activities-implementer`) and chained them with handoffs |
-| **Phase 4** | Built an agent skill that references the prompt file and layers school-specific defaults on top |
+| **Phase 4** | Installed Anthropic's `pdf` agent skill and used it to generate real PDFs (rosters, handbook) directly from `activities.json` |
+| **Phase 5** | Wrote and registered the `school-activities` MCP server in Python and drove it from Copilot with chained tool calls |
+| **Phase 6** | Bundled the custom agent + MCP server into a `my-school-plugin/` plugin package ready for distribution |
 
 ### Key Takeaways
 
@@ -703,5 +1070,7 @@ You've completed **Lab 02 — Copilot Custom Instructions**! Here's a recap of w
 - **Path-specific custom instructions** (`*.instructions.md`) target only the files that need them using glob patterns.
 - **Prompt files** (`*.prompt.md`) package multi-step workflows into reusable slash commands.
 - **Custom agents** (`*.agent.md`) bundle persona, tool restrictions, model preference, and handoffs into one selectable role — and compose with instructions, prompt files, and agent skills.
-- **Agent Skills** (`SKILL.md`) give Copilot deep domain expertise so it writes higher-quality, specialized code.
-- **Agent Mode** can create the instruction files, prompt files, agents, and agent skills themselves — let Copilot do the heavy lifting!
+- **Agent Skills** (`SKILL.md`) bundle on-demand expertise plus supporting files (scripts, references) that Copilot loads only when the task matches the skill's `description` — enabling progressive disclosure of large knowledge bases.
+- **MCP servers** expose data and capabilities Copilot can't reach on its own — each one is an isolated process with its own tool surface.
+- **Plugins** bundle agents, MCP servers, skills, and hooks into a single distributable package — the unit of sharing across teams and the community.
+- **Agent Mode** can create the instruction files, prompt files, agents, agent skills, MCP servers, and plugin manifests themselves — let Copilot do the heavy lifting!
