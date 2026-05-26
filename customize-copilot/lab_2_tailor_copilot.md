@@ -647,7 +647,7 @@ Rather than write a skill from scratch, let's **install a real one** — Anthrop
 
 5. **Confirm the skill is loaded.** Open Copilot Chat in **Agent** mode and ask:
 
-   > ```
+   > ```prompt
    > What skills do you have available?
    > ```
 
