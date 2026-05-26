@@ -645,7 +645,13 @@ Rather than write a skill from scratch, let's **install a real one** — Anthrop
 
 4. **Restart VS Code** (or reload the window) so Copilot picks up the new skill.
 
-5. **Confirm the skill is loaded.** Open the Command Palette → **`Chat: Diagnostics`**. Under the skills list you should see `pdf` with the path `.github/skills/pdf/SKILL.md`.
+5. **Confirm the skill is loaded.** Open Copilot Chat in **Agent** mode and ask:
+
+   > ```
+   > What skills do you have available?
+   > ```
+
+   Copilot should list `pdf` in its response. If it doesn't appear, reload the window (`Ctrl+Shift+P` → **Developer: Reload Window**) and try again.
 
 ### Activity: Generate a PDF roster from activities.json 📄
 
@@ -743,6 +749,11 @@ You're going to expose the school activities (the same data that powers the webs
    mkdir -p mcp_servers
    touch mcp_servers/__init__.py
    ```
+
+   > 🪟 **PowerShell:** `touch` is not available. Use `New-Item` instead:
+   > ```powershell
+   > New-Item mcp_servers/__init__.py
+   > ```
 
 3. **Create the server file at `mcp_servers/school_activities_server.py`.** You can write it yourself or ask Copilot in **Agent** mode:
 
@@ -880,7 +891,20 @@ You're going to expose the school activities (the same data that powers the webs
 
 Building your own MCP is the load-bearing skill — but most teams will spend more time **consuming** community MCPs than authoring them. The **Microsoft Learn MCP** is a great example: it gives Copilot grounded access to official Microsoft documentation.
 
-1. Install the Microsoft Learn MCP following the upstream instructions on the [MCP registry](https://github.com/mcp). For VS Code this is typically a one-click install that adds an entry to `.vscode/mcp.json`.
+1. Install the Microsoft Learn MCP from the [MCP registry](https://github.com/mcp/microsoftdocs/mcp). You can use the one-click **Install** button on the registry page, or add it manually to `.vscode/mcp.json`:
+
+   ```json
+   {
+     "servers": {
+       "microsoft-learn": {
+         "type": "http",
+         "url": "https://learn.microsoft.com/api/mcp"
+       }
+     }
+   }
+   ```
+
+   > 💡 **Note:** The Microsoft Learn MCP uses HTTP transport — no local process to install or manage. VS Code connects directly to the hosted endpoint.
 
 2. Verify it's running (**MCP: List Servers**), then try:
 
@@ -1020,6 +1044,8 @@ If this setting is grayed out, your org admin controls it.
 
 **Registering the plugin path for local development:**
 
+Add this to `.vscode/settings.json` (alongside `chat.plugins.enabled`):
+
 ```json
 {
   "chat.pluginLocations": {
@@ -1033,6 +1059,58 @@ If this setting is grayed out, your org admin controls it.
 1. The `activities-implementer` agent shows up in the agent picker.
 2. **MCP: List Servers** lists `school-activities` (auto-started by the plugin).
 3. `list_activities` and `get_signups_count` appear in **Configure Tools**.
+
+**Testing the plugin from a separate workspace:**
+
+`chat.pluginLocations` accepts absolute paths, so you can load the plugin into any workspace without moving or copying any files. This lets you simulate exactly what another developer would experience after installing it.
+
+1. Open VS Code in a **new, empty folder** (File → Open Folder → pick or create an empty directory).
+2. Create `.vscode/settings.json` in that folder with an absolute path to your `my-school-plugin/` directory. Replace the placeholder with the actual path on your machine:
+
+```json
+{
+  "chat.plugins.enabled": true,
+  "chat.pluginLocations": {
+    "/absolute/path/to/your/my-school-plugin": true
+  }
+}
+```
+
+> 🪟 **Windows example:** `"C:\\Users\\you\\projects\\customize-copilot\\my-school-plugin": true`
+> 🍎 **macOS/Linux example:** `"/home/you/projects/customize-copilot/my-school-plugin": true`
+
+3. Reload the window (**Developer: Reload Window** from the Command Palette).
+4. Verify in the new workspace:
+   - `activities-implementer` appears in the agent picker (@ menu in the Chat view).
+   - **MCP: List Servers** shows `school-activities` started.
+   - **Configure Tools** lists `list_activities` and `get_signups_count`.
+5. Ask `@activities-implementer` a question — it should answer using tools from the MCP server even though the new workspace contains no source code at all.
+
+> **Note:** The `command: "python"` in `my-school-plugin/.mcp.json` relies on `python` being on the system PATH. If the server fails to start in the new workspace, use the absolute path to the venv interpreter instead (e.g. `C:\\path\\to\\your\\.venv\\Scripts\\python.exe` on Windows or `/path/to/your/.venv/bin/python` on macOS/Linux).
+
+**Alternative: publish to Git and install from source**
+
+If `chat.pluginLocations` doesn't load the plugin (it's a preview feature and may behave differently across VS Code versions), publish the plugin to a Git repository and install it properly instead:
+
+1. Initialize a Git repo inside `my-school-plugin/`, commit the files, and push to a new remote:
+
+   ```bash
+   cd my-school-plugin
+   git init
+   git add .
+   git commit -m "initial plugin"
+   gh repo create my-school-plugin --public --source=. --remote=origin --push
+   ```
+
+2. In any workspace, open the Command Palette and run **Chat: Install Plugin From Source**, then enter your repository URL:
+
+   ```
+   https://github.com/YOUR-USERNAME/my-school-plugin
+   ```
+
+3. VS Code clones the plugin into its own cache (`%APPDATA%\Code\agentPlugins\` on Windows) and registers it globally — no path configuration needed. The plugin will now appear in **Extensions: Agent Plugins** and work in every workspace.
+
+> **Why this matters:** `chat.pluginLocations` is a development-only shortcut. Publishing to Git is how your plugin would actually reach other developers — they install it once and it works everywhere on their machine, isolated from your source files.
 
 **Where this is going (production):**
 
