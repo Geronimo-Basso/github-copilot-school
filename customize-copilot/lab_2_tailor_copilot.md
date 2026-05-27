@@ -13,6 +13,7 @@ Teach **GitHub Copilot** to speak your project's language. Custom instructions, 
 - [Phase 3: Custom Agents](#phase-3-custom-agents)
 - [Phase 4: Agent Skills](#phase-4-agent-skills)
 - [Phase 5: Model Context Protocol (MCP)](#phase-5-model-context-protocol-mcp)
+- [Phase 5b: Agent Hooks (Preview)](#phase-5b-agent-hooks-preview)
 - [Phase 6: Plugins](#phase-6-plugins)
 - [Congratulations! 🎉](#congratulations-)
 
@@ -26,6 +27,7 @@ Today's goal is to learn how to **customize GitHub Copilot's behavior** so its o
 - **Custom Agents** — Define reusable personas with their own instructions, tool restrictions, and handoffs
 - **Agent Skills** — Package domain expertise so Copilot writes better code in specialized areas
 - **Model Context Protocol (MCP)** — Expose data and capabilities to Copilot via standardized server processes
+- **Agent Hooks** — Execute shell commands at key agent lifecycle points to enforce quality checks and guide agent behavior deterministically
 - **Plugins** — Bundle agents, MCP servers, and skills into a single shareable, installable package
 
 By the end of this lab you will have set up custom instructions at every scope, fixed non-compliant content in your activities data, built a prompt file to automate adding new activities, defined a pair of custom agents that hand off work to each other, created an agent skill that layers expert defaults on top of that prompt, written your own MCP server that exposes the school activities to Copilot, and packaged everything as a distributable plugin — all on the FastAPI school activities website from Lab 01. ♟️ ⚽️ 🎻
@@ -921,6 +923,310 @@ Building your own MCP is the load-bearing skill — but most teams will spend mo
 
 ---
 
+## Phase 5b: Agent Hooks (Preview)
+
+Everything you've built so far — instructions, prompt files, agents, skills, MCP servers — guides Copilot through text. Agent Hooks let you go one step further: **run real shell code** at defined points in the agent lifecycle, so validation and context injection happen automatically, not just when you remember to ask.
+
+> ⚠️ **Preview feature.** Agent Hooks require VS Code 1.100+ and are gated behind the `chat.useCustomAgentHooks` setting. Behavior may change before GA.
+
+### 📖 Theory: Hook Basics
+
+| Concept | Details |
+| ------- | ------- |
+| **Lifecycle events** | `UserPromptSubmit`, `PostToolUse`, `PreToolUse`, `AgentStart`, `AgentStop`, `SubagentStart`, `SubagentStop`, `Error` |
+| **Scope** | **Workspace** — `.github/hooks/*.json`, loaded for every chat session in the repo; **Agent** — `hooks:` block in `.agent.md` frontmatter, loaded only when that agent is active; **Personal** — user-settings hooks, outside this lab |
+| **Input** | The hook process receives a JSON object on **stdin** with fields like `hookEventName`, `tool_name`, `tool_input`, `tool_response`, and `prompt` |
+| **Output** | Write JSON to **stdout** with `hookSpecificOutput.additionalContext` to inject context, `systemMessage` for a user-visible message, or `continue: false` to abort |
+| **Exit codes** | `0` = success; non-zero = hook error (Copilot surfaces a warning) |
+
+Two hooks will enforce quality in this project:
+
+1. **`PostToolUse` (workspace scope)** — After every file edit, validate that `activities.json` is still valid JSON and follows the schema. Fires for all agents.
+2. **`UserPromptSubmit` (agent scope, `activities-implementer` only)** — Before Copilot calls any tool, check whether the prompt mentions a quoted activity name that doesn't exist yet, and offer to create it with `/new-activity`.
+
+---
+
+### Activity 1 — Workspace-scoped PostToolUse validation hook
+
+**Goal:** Automatically catch `activities.json` schema errors the moment any agent edits the file.
+
+#### Step 0 — Enable the preview setting
+
+*Agent Hooks is a preview feature that must be explicitly opted in to. Adding this setting activates hook loading for the workspace.*
+
+1. Open `.vscode/settings.json` at the workspace root. If the file doesn't exist yet, create it.
+
+2. Add or update the file so it contains:
+
+   ```json
+   {
+     "chat.useCustomAgentHooks": true
+   }
+   ```
+
+3. Save the file and **reload the VS Code window** (`Ctrl+Shift+P` → *Developer: Reload Window*) so the new setting takes effect.
+
+#### Step 1 — Create the validation script
+
+*The hook runs a Python script — keeping the logic in a `.py` file instead of an inline shell command makes it easy to test, version, and extend.*
+
+1. Create the required folder structure inside `.github/`:
+
+   ```
+   .github/
+   └── hooks/
+       └── scripts/
+   ```
+
+   You can do this from the VS Code Explorer (right-click → **New Folder**) or from a terminal:
+
+   ```bash
+   mkdir -p .github/hooks/scripts
+   ```
+
+2. Inside `.github/hooks/scripts/`, create a new file called **`validate_activities.py`** and paste the following content:
+
+   ```python
+   #!/usr/bin/env python3
+   """PostToolUse hook: validate activities.json after any file edit.
+
+   VS Code sends a JSON object via stdin describing the tool call that just
+   finished. This script checks whether activities.json is still valid JSON
+   and follows the expected schema, then writes feedback to stdout that Copilot
+   injects into the conversation context.
+   """
+   import json
+   import pathlib
+   import sys
+
+   data = json.loads(sys.stdin.read())
+
+   # Only run when the agent edited a file — ignore unrelated tool calls
+   if data.get("tool_name") not in (
+       "editFiles",
+       "create_file",
+       "replace_string_in_file",
+       "insert_edit_into_file",
+   ):
+       sys.exit(0)
+
+   activities_file = pathlib.Path("app/backend/data/activities.json")
+   if not activities_file.exists():
+       sys.exit(0)
+
+   try:
+       activities = json.loads(activities_file.read_text(encoding="utf-8"))
+   except json.JSONDecodeError as exc:
+       print(
+           json.dumps(
+               {
+                   "hookSpecificOutput": {
+                       "hookEventName": "PostToolUse",
+                       "additionalContext": (
+                           f"⚠️ activities.json is invalid JSON after your edit: {exc}. "
+                           "Fix the syntax before continuing."
+                       ),
+                   }
+               }
+           )
+       )
+       sys.exit(0)
+
+   errors = []
+   for name, entry in activities.items():
+       if not isinstance(entry.get("max_participants"), int):
+           errors.append(f"'{name}': max_participants must be an integer, not a string.")
+       if not isinstance(entry.get("participants"), list):
+           errors.append(f"'{name}': participants must be an array.")
+
+   if errors:
+       print(
+           json.dumps(
+               {
+                   "hookSpecificOutput": {
+                       "hookEventName": "PostToolUse",
+                       "additionalContext": (
+                           "⚠️ activities.json has schema issues after your last edit: "
+                           + "; ".join(errors)
+                           + " Fix these before continuing."
+                       ),
+                   }
+               }
+           )
+       )
+   ```
+
+   What the script does:
+   - **Ignores** tool calls that are not file edits (searches, MCP calls, etc.) so it stays silent when not needed.
+   - **Reports** a clear error message if the JSON syntax is broken after an edit.
+   - **Checks** every entry for the two most common schema violations: `max_participants` as a string and `participants` as a non-array.
+
+#### Step 2 — Create the workspace hook configuration file
+
+*VS Code discovers workspace hooks from any `*.json` file inside `.github/hooks/`. Separating concerns into named files (one per guard) keeps hook configuration readable as the project grows.*
+
+1. Inside `.github/hooks/`, create a new file called **`activities-guard.json`** and paste the following content:
+
+   ```json
+   {
+     "hooks": {
+       "PostToolUse": [
+         {
+           "type": "command",
+           "command": "python .github/hooks/scripts/validate_activities.py",
+           "windows": "python .github/hooks/scripts/validate_activities.py"
+         }
+       ]
+     }
+   }
+   ```
+
+   > 💡 The `windows` key provides the same command and ensures the correct Python executable name is used on Windows. On macOS/Linux the `command` key is used.
+
+2. Verify the final directory layout looks like this:
+
+   ```
+   .github/
+   └── hooks/
+       ├── activities-guard.json        ← discovered automatically by VS Code
+       └── scripts/
+           └── validate_activities.py
+   ```
+
+#### Step 3 — Test the validation hook
+
+*Deliberately breaking the file confirms the hook fires and that Copilot self-corrects from the injected context — that's the only way to trust automation.*
+
+1. Open `app/backend/data/activities.json`.
+2. Change any `max_participants` value from a number to a string (e.g., `"20"`).
+3. Save the file.
+4. Open GitHub Copilot Chat and send any message (e.g., "What activities are available?").
+5. Observe that Copilot's next response acknowledges the schema issue and offers to fix it.
+6. Revert your deliberate change.
+
+---
+
+### Activity 2 — Agent-scoped UserPromptSubmit hook
+
+**Goal:** When a user asks `activities-implementer` about an activity that doesn't exist yet, have Copilot proactively offer to create it — before attempting any tool call that would fail.
+
+#### Step 1 — Understand why UserPromptSubmit, not PostToolUse
+
+*`PostToolUse` fires only after a tool completes successfully. If the MCP server raises a `ValueError` for an unknown activity, there is no "success" event — the hook never fires. `UserPromptSubmit` fires before any tool is called, making it reliable for proactive checks.*
+
+The hook reads `prompt` from the stdin JSON and scans for quoted strings (e.g., `"Knitting Club"`). If a quoted name is absent from `activities.json`, it injects context telling Copilot to inform the user and offer the `/new-activity` workflow.
+
+#### Step 2 — Create the hook script
+
+*Keeping the detection logic in a `.py` file makes it easy to test independently and extend with additional rules — for example, checking for valid schedule formats in the prompt.*
+
+1. Inside `.github/hooks/scripts/`, create a new file called **`check_activity_exists.py`** and paste the following content:
+
+   ```python
+   #!/usr/bin/env python3
+   """UserPromptSubmit hook (scoped to activities-implementer):
+
+   Detect quoted activity names in the user's prompt that don't exist in
+   activities.json and inject a suggestion to create them with /new-activity.
+
+   VS Code sends the prompt text via stdin as a JSON object. If the prompt
+   contains quoted strings (e.g., "Knitting Club") that are not in the data
+   file, this script outputs an additionalContext field that Copilot uses to
+   guide its response before any tool call is made.
+   """
+   import json
+   import pathlib
+   import re
+   import sys
+
+   data = json.loads(sys.stdin.read())
+   prompt = data.get("prompt", "")
+
+   activities_file = pathlib.Path("app/backend/data/activities.json")
+   if not activities_file.exists():
+       sys.exit(0)
+
+   try:
+       activities = json.loads(activities_file.read_text(encoding="utf-8"))
+   except json.JSONDecodeError:
+       sys.exit(0)
+
+   # Match quoted strings in the prompt, e.g.: "Knitting Club"
+   quoted_names = re.findall(r'"([^"]+)"', prompt)
+   missing = [n for n in quoted_names if n not in activities]
+
+   if missing:
+       names = ", ".join(f'"{{n}}"' for n in missing)
+       print(
+           json.dumps(
+               {
+                   "hookSpecificOutput": {
+                       "hookEventName": "UserPromptSubmit",
+                       "additionalContext": (
+                           f"The following activities were not found in activities.json: {names}. "
+                           "Inform the user that the activity does not exist. "
+                           "Ask whether they would like to create it. "
+                           "If they agree, use the /new-activity workflow to add it "
+                           "with all required fields."
+                       ),
+                   }
+               }
+           )
+       )
+   ```
+
+   Key points about this script:
+   - The regex `r'"([^"]+)"'` matches **straight double-quoted** strings in the prompt (e.g., `"Knitting Club"`).
+   - It cross-references the matched names against the top-level keys in `activities.json`.
+   - Only missing names trigger output — existing names pass silently, so Copilot is not interrupted unnecessarily.
+
+#### Step 3 — Add the hook to the agent frontmatter
+
+*Agent-scoped hooks are declared directly in the `.agent.md` frontmatter. This scope ensures the "offer to create" suggestion appears only when the user is talking to `activities-implementer`, not in every chat window.*
+
+1. Open `.github/agents/activities-implementer.agent.md`.
+
+2. The file starts with a YAML frontmatter block between `---` markers. Add the `hooks:` block so the complete frontmatter looks like this:
+
+   ```yaml
+   ---
+   name: activities-implementer
+   description: Applies activity changes to activities.json following project conventions.
+   hooks:
+     UserPromptSubmit:
+       - type: command
+         command: "python .github/hooks/scripts/check_activity_exists.py"
+         windows: "python .github/hooks/scripts/check_activity_exists.py"
+   ---
+   ```
+
+3. Save the file. Leave everything below the closing `---` (the agent body) exactly as it is.
+
+#### Step 4 — Test the hook
+
+*An end-to-end test confirms the complete chain: user prompt → hook fires → Copilot receives context → response guides the user correctly.*
+
+1. Switch to the **`activities-implementer`** agent in GitHub Copilot Chat.
+2. Send:
+   ```
+   How many students signed up for "Underwater Basket Weaving"?
+   ```
+3. Copilot should reply that `"Underwater Basket Weaving"` doesn't exist and ask if you'd like to create it.
+4. Reply **yes** — Copilot should invoke the `/new-activity` prompt file to walk you through adding it.
+5. Once added, repeat the original question — this time Copilot should answer normally.
+
+<details>
+<summary>🔧 Troubleshooting</summary>
+
+- **Hook not firing?** Verify `"chat.useCustomAgentHooks": true` is in `.vscode/settings.json` and reload the VS Code window.
+- **Python not found?** Make sure `python` is on your `PATH`. On some systems you may need `python3` — update both the `command` and `windows` fields accordingly.
+- **No output even when a name is missing?** Check that you used straight double quotes (`"`) in your prompt, not curly/smart quotes.
+- **Script errors?** Run the script manually: `echo '{"prompt": "\"Knitting Club\""}' | python .github/hooks/scripts/check_activity_exists.py` — you should see JSON on stdout.
+
+</details>
+
+---
+
 ## Phase 6: Plugins
 
 You've now built a small toolbox of customizations: a path-specific instruction file, a prompt file, two custom agents, an agent skill, and an MCP server. Each one lives in a different folder under `.github/`, `.vscode/`, or `mcp_servers/`. That's fine for your own workspace — but how do you **share** all of it with a teammate?
@@ -1137,6 +1443,7 @@ You've completed **Lab 02 — Customizing GitHub Copilot**! Here's a recap of wh
 | **Phase 3** | Defined two custom agents (`activities-planner` read-only and `activities-implementer`) and chained them with handoffs |
 | **Phase 4** | Installed Anthropic's `pdf` agent skill and used it to generate real PDFs (rosters, handbook) directly from `activities.json` |
 | **Phase 5** | Wrote and registered the `school-activities` MCP server in Python and drove it from Copilot with chained tool calls |
+| **Phase 5b** | Created a workspace-scoped JSON validation hook and an agent-scoped `UserPromptSubmit` hook on `activities-implementer` that detects unknown activities and offers to create them via `/new-activity` |
 | **Phase 6** | Bundled the custom agent + MCP server into a `my-school-plugin/` plugin package ready for distribution |
 
 ### Key Takeaways
@@ -1150,5 +1457,6 @@ You've completed **Lab 02 — Customizing GitHub Copilot**! Here's a recap of wh
 - **Custom agents** (`*.agent.md`) bundle persona, tool restrictions, model preference, and handoffs into one selectable role — and compose with instructions, prompt files, and agent skills.
 - **Agent Skills** (`SKILL.md`) bundle on-demand expertise plus supporting files (scripts, references) that Copilot loads only when the task matches the skill's `description` — enabling progressive disclosure of large knowledge bases.
 - **MCP servers** expose data and capabilities Copilot can't reach on its own — each one is an isolated process with its own tool surface.
+- **Agent hooks** fire at defined lifecycle points and execute real shell code — deterministic automation that complements natural-language instructions.
 - **Plugins** bundle agents, MCP servers, skills, and hooks into a single distributable package — the unit of sharing across teams and the community.
 - **Agent Mode** can create the instruction files, prompt files, agents, agent skills, MCP servers, and plugin manifests themselves — let Copilot do the heavy lifting!
