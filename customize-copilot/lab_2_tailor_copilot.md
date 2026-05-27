@@ -649,7 +649,7 @@ Rather than write a skill from scratch, let's **install a real one** — Anthrop
 
 5. **Confirm the skill is loaded.** Open Copilot Chat in **Agent** mode and ask:
 
-   > ```prompt
+   > ```
    > What skills do you have available?
    > ```
 
@@ -1106,83 +1106,94 @@ Two hooks will enforce quality in this project:
 
 ---
 
-### Activity 2 — Agent-scoped UserPromptSubmit hook
+### Activity 2 — Agent-scoped UserPromptSubmit hook: inject library versions
 
-**Goal:** When a user asks `activities-implementer` about an activity that doesn't exist yet, have Copilot proactively offer to create it — before attempting any tool call that would fail.
+**Goal:** Before the `activities-implementer` agent executes any tool call, automatically inject the installed versions of the project's Python dependencies as context. This lets Copilot make version-aware decisions — for example, using the correct FastAPI route syntax, Pydantic model APIs, and pytest fixtures for the exact versions installed in the virtual environment.
 
-#### Step 1 — Understand why UserPromptSubmit, not PostToolUse
+#### Step 1 — Understand why UserPromptSubmit is the right hook for this
 
-*`PostToolUse` fires only after a tool completes successfully. If the MCP server raises a `ValueError` for an unknown activity, there is no "success" event — the hook never fires. `UserPromptSubmit` fires before any tool is called, making it reliable for proactive checks.*
+*`PostToolUse` fires only after a tool completes. Injecting library context at that point is too late — Copilot has already chosen its approach. `UserPromptSubmit` fires before any tool is called, giving Copilot the version information it needs to plan correctly from the very first step.*
 
-The hook reads `prompt` from the stdin JSON and scans for quoted strings (e.g., `"Knitting Club"`). If a quoted name is absent from `activities.json`, it injects context telling Copilot to inform the user and offer the `/new-activity` workflow.
+The hook uses Python's standard `importlib.metadata` module to query the installed version of each dependency declared in `requirements.txt`. The result is injected as `additionalContext` so Copilot knows — for every request — which APIs and features are actually available.
 
 #### Step 2 — Create the hook script
 
-*Keeping the detection logic in a `.py` file makes it easy to test independently and extend with additional rules — for example, checking for valid schedule formats in the prompt.*
+*Using `importlib.metadata` (stdlib since Python 3.8) avoids shelling out to `pip` and works inside any virtual environment that has the packages installed.*
 
-1. Inside `.github/hooks/scripts/`, create a new file called **`check_activity_exists.py`** and paste the following content:
+1. Inside `.github/hooks/scripts/`, create a new file called **`inject_library_versions.py`** and paste the following content:
 
    ```python
    #!/usr/bin/env python3
    """UserPromptSubmit hook (scoped to activities-implementer):
 
-   Detect quoted activity names in the user's prompt that don't exist in
-   activities.json and inject a suggestion to create them with /new-activity.
+   Inject the installed versions of project dependencies as additionalContext
+   before the agent executes any tool. Copilot uses this information to choose
+   only APIs and patterns that are valid for the exact versions installed —
+   avoiding deprecated methods or features introduced in later releases.
 
-   VS Code sends the prompt text via stdin as a JSON object. If the prompt
-   contains quoted strings (e.g., "Knitting Club") that are not in the data
-   file, this script outputs an additionalContext field that Copilot uses to
-   guide its response before any tool call is made.
+   Also emits a systemMessage so the version summary is visible in the chat
+   before Copilot replies, confirming the hook fired.
+
+   VS Code sends the prompt via stdin as a JSON object; this script writes
+   a JSON response to stdout regardless of the prompt content.
    """
+   import importlib.metadata
    import json
-   import pathlib
-   import re
+   import platform
    import sys
 
-   data = json.loads(sys.stdin.read())
-   prompt = data.get("prompt", "")
+   PACKAGES = ["fastapi", "uvicorn", "pydantic", "pytest"]
 
-   activities_file = pathlib.Path("app/backend/data/activities.json")
-   if not activities_file.exists():
-       sys.exit(0)
+   versions: dict[str, str] = {}
+   for pkg in PACKAGES:
+       try:
+           versions[pkg] = importlib.metadata.version(pkg)
+       except importlib.metadata.PackageNotFoundError:
+           versions[pkg] = "not installed"
 
-   try:
-       activities = json.loads(activities_file.read_text(encoding="utf-8"))
-   except json.JSONDecodeError:
-       sys.exit(0)
+   python_version = platform.python_version()
+   version_lines = "\n".join(f"- {pkg}: {ver}" for pkg, ver in versions.items())
 
-   # Match quoted strings in the prompt, e.g.: "Knitting Club"
-   quoted_names = re.findall(r'"([^"]+)"', prompt)
-   missing = [n for n in quoted_names if n not in activities]
+   context = (
+       f"This project's installed dependency versions are:\n"
+       f"- python: {python_version}\n"
+       f"{version_lines}\n\n"
+       "When writing or modifying backend code, use only APIs and features "
+       "compatible with these exact versions. Do not use methods, parameters, "
+       "or decorators that were deprecated or removed in any of these versions, "
+       "and do not assume features available only in newer releases."
+   )
 
-   if missing:
-       names = ", ".join(f'"{{n}}"' for n in missing)
-       print(
-           json.dumps(
-               {
-                   "hookSpecificOutput": {
-                       "hookEventName": "UserPromptSubmit",
-                       "additionalContext": (
-                           f"The following activities were not found in activities.json: {names}. "
-                           "Inform the user that the activity does not exist. "
-                           "Ask whether they would like to create it. "
-                           "If they agree, use the /new-activity workflow to add it "
-                           "with all required fields."
-                       ),
-                   }
-               }
-           )
+   # Read stdin to satisfy the hook contract (VS Code always sends JSON).
+   sys.stdin.read()
+
+   summary = f"python {python_version} | " + " | ".join(
+       f"{pkg} {ver}" for pkg, ver in versions.items()
+   )
+
+   print(
+       json.dumps(
+           {
+               "systemMessage": f"🔍 Versions injected into context: {summary}",
+               "hookSpecificOutput": {
+                   "hookEventName": "UserPromptSubmit",
+                   "additionalContext": context,
+               },
+           }
        )
+   )
    ```
 
    Key points about this script:
-   - The regex `r'"([^"]+)"'` matches **straight double-quoted** strings in the prompt (e.g., `"Knitting Club"`).
-   - It cross-references the matched names against the top-level keys in `activities.json`.
-   - Only missing names trigger output — existing names pass silently, so Copilot is not interrupted unnecessarily.
+   - `importlib.metadata.version(pkg)` reads the installed version directly from the package metadata — no subprocess or network call needed.
+   - The `PACKAGES` list now includes `pydantic` alongside `fastapi`, `uvicorn`, and `pytest`, so Copilot is informed about Pydantic's major version and can generate models using the correct syntax (v1 vs v2).
+   - The script emits a **`systemMessage`** (a visible info banner in Copilot Chat) alongside the silent `additionalContext`, so you can confirm at a glance that the hook fired and which versions were injected.
+   - The script always produces output, so Copilot is always aware of the versions before it acts.
+   - To track a new dependency, just add its name to the `PACKAGES` list.
 
 #### Step 3 — Add the hook to the agent frontmatter
 
-*Agent-scoped hooks are declared directly in the `.agent.md` frontmatter. This scope ensures the "offer to create" suggestion appears only when the user is talking to `activities-implementer`, not in every chat window.*
+*Agent-scoped hooks are declared directly in the `.agent.md` frontmatter. Scoping to `activities-implementer` ensures version context is injected only when working on this project's backend — not in unrelated chat sessions.*
 
 1. Open `.github/agents/activities-implementer.agent.md`.
 
@@ -1195,8 +1206,8 @@ The hook reads `prompt` from the stdin JSON and scans for quoted strings (e.g., 
    hooks:
      UserPromptSubmit:
        - type: command
-         command: "python .github/hooks/scripts/check_activity_exists.py"
-         windows: "python .github/hooks/scripts/check_activity_exists.py"
+         command: "python .github/hooks/scripts/inject_library_versions.py"
+         windows: "python .github/hooks/scripts/inject_library_versions.py"
    ---
    ```
 
@@ -1204,24 +1215,42 @@ The hook reads `prompt` from the stdin JSON and scans for quoted strings (e.g., 
 
 #### Step 4 — Test the hook
 
-*An end-to-end test confirms the complete chain: user prompt → hook fires → Copilot receives context → response guides the user correctly.*
+*A quick sanity-check confirms the chain works: user prompt → hook fires → a visible banner shows the versions → Copilot uses those versions to produce compatible code.*
+
+> 💡 The hook now emits both a **`systemMessage`** (a visible info banner in the chat) and **`additionalContext`** (silent context injected into Copilot's prompt). The banner is the confirmation you can see; the context is what guides Copilot's decisions. Keep in mind that `additionalContext` is injected silently — it does not appear in any panel. 
 
 1. Switch to the **`activities-implementer`** agent in GitHub Copilot Chat.
-2. Send:
+
+2. Send any prompt — for example:
+   ```prompt
+   Write a parametrized pytest test for the GET /activities endpoint that checks
+   the response schema, using fixtures and syntax compatible with our installed
+   pytest and FastAPI versions.
    ```
-   How many students signed up for "Underwater Basket Weaving"?
+
+3. **Before Copilot replies**, look for the system message banner directly above the response. It will read:
    ```
-3. Copilot should reply that `"Underwater Basket Weaving"` doesn't exist and ask if you'd like to create it.
-4. Reply **yes** — Copilot should invoke the `/new-activity` prompt file to walk you through adding it.
-5. Once added, repeat the original question — this time Copilot should answer normally.
+   🔍 Versions injected into context: python X.X.X | fastapi X.X.X | uvicorn X.X.X | pydantic X.X.X | pytest X.X.X
+   ```
+   This confirms the hook fired and the exact installed versions were passed to Copilot.
+
+4. Inspect Copilot's generated test. It should use the `TestClient` pattern (FastAPI's synchronous test helper) and `pytest` fixtures that are valid for the installed version — not patterns from a different major release (e.g., no Pydantic v1 `class Config` if v2 is installed, no `@pytest.mark.asyncio` unless an async test framework is present).
+
+5. **Optional — stress-test version awareness:** Ask Copilot directly:
+   ```prompt
+   What exact Python and library versions are you working with in this project?
+   ```
+   Copilot should answer with the version numbers from the banner without reading any file, because the hook already injected them as context.
+
+6. **Optional — observe version-driven differences:** Temporarily edit the `PACKAGES` list in `.github/hooks/scripts/inject_library_versions.py` to remove `pydantic`, save, and send another prompt. Notice that Copilot no longer mentions Pydantic compatibility in its plan. Re-add it when done.
 
 <details>
 <summary>🔧 Troubleshooting</summary>
 
 - **Hook not firing?** Verify `"chat.useCustomAgentHooks": true` is in `.vscode/settings.json` and reload the VS Code window.
-- **Python not found?** Make sure `python` is on your `PATH`. On some systems you may need `python3` — update both the `command` and `windows` fields accordingly.
-- **No output even when a name is missing?** Check that you used straight double quotes (`"`) in your prompt, not curly/smart quotes.
-- **Script errors?** Run the script manually: `echo '{"prompt": "\"Knitting Club\""}' | python .github/hooks/scripts/check_activity_exists.py` — you should see JSON on stdout.
+- **Python not found on PATH?** Make sure your virtual environment is activated, or replace `python` with the full path to the interpreter in both the `command` and `windows` fields.
+- **`PackageNotFoundError` for a package?** The package is not installed in the active environment — run `pip install -r requirements.txt` first.
+- **Test the script in isolation:** `echo "{}" | python .github/hooks/scripts/inject_library_versions.py` — you should see a JSON object with `additionalContext` containing the version list.
 
 </details>
 
