@@ -13,6 +13,7 @@ Teach **GitHub Copilot** to speak your project's language. Custom instructions, 
 - [Phase 3: Custom Agents](#phase-3-custom-agents)
 - [Phase 4: Agent Skills](#phase-4-agent-skills)
 - [Phase 5: Model Context Protocol (MCP)](#phase-5-model-context-protocol-mcp)
+- [Phase 5b: Agent Hooks (Preview)](#phase-5b-agent-hooks-preview)
 - [Phase 6: Plugins](#phase-6-plugins)
 - [Congratulations! 🎉](#congratulations-)
 
@@ -26,6 +27,7 @@ Today's goal is to learn how to **customize GitHub Copilot's behavior** so its o
 - **Custom Agents** — Define reusable personas with their own instructions, tool restrictions, and handoffs
 - **Agent Skills** — Package domain expertise so Copilot writes better code in specialized areas
 - **Model Context Protocol (MCP)** — Expose data and capabilities to Copilot via standardized server processes
+- **Agent Hooks** — Execute shell commands at key agent lifecycle points to enforce quality checks and guide agent behavior deterministically
 - **Plugins** — Bundle agents, MCP servers, and skills into a single shareable, installable package
 
 By the end of this lab you will have set up custom instructions at every scope, fixed non-compliant content in your activities data, built a prompt file to automate adding new activities, defined a pair of custom agents that hand off work to each other, created an agent skill that layers expert defaults on top of that prompt, written your own MCP server that exposes the school activities to Copilot, and packaged everything as a distributable plugin — all on the FastAPI school activities website from Lab 01. ♟️ ⚽️ 🎻
@@ -645,7 +647,13 @@ Rather than write a skill from scratch, let's **install a real one** — Anthrop
 
 4. **Restart VS Code** (or reload the window) so Copilot picks up the new skill.
 
-5. **Confirm the skill is loaded.** Open the Command Palette → **`Chat: Diagnostics`**. Under the skills list you should see `pdf` with the path `.github/skills/pdf/SKILL.md`.
+5. **Confirm the skill is loaded.** Open Copilot Chat in **Agent** mode and ask:
+
+   > ```
+   > What skills do you have available?
+   > ```
+
+   Copilot should list `pdf` in its response. If it doesn't appear, reload the window (`Ctrl+Shift+P` → **Developer: Reload Window**) and try again.
 
 ### Activity: Generate a PDF roster from activities.json 📄
 
@@ -743,6 +751,11 @@ You're going to expose the school activities (the same data that powers the webs
    mkdir -p mcp_servers
    touch mcp_servers/__init__.py
    ```
+
+   > 🪟 **PowerShell:** `touch` is not available. Use `New-Item` instead:
+   > ```powershell
+   > New-Item mcp_servers/__init__.py
+   > ```
 
 3. **Create the server file at `mcp_servers/school_activities_server.py`.** You can write it yourself or ask Copilot in **Agent** mode:
 
@@ -880,7 +893,20 @@ You're going to expose the school activities (the same data that powers the webs
 
 Building your own MCP is the load-bearing skill — but most teams will spend more time **consuming** community MCPs than authoring them. The **Microsoft Learn MCP** is a great example: it gives Copilot grounded access to official Microsoft documentation.
 
-1. Install the Microsoft Learn MCP following the upstream instructions on the [MCP registry](https://github.com/mcp). For VS Code this is typically a one-click install that adds an entry to `.vscode/mcp.json`.
+1. Install the Microsoft Learn MCP from the [MCP registry](https://github.com/mcp/microsoftdocs/mcp). You can use the one-click **Install** button on the registry page, or add it manually to `.vscode/mcp.json`:
+
+   ```json
+   {
+     "servers": {
+       "microsoft-learn": {
+         "type": "http",
+         "url": "https://learn.microsoft.com/api/mcp"
+       }
+     }
+   }
+   ```
+
+   > 💡 **Note:** The Microsoft Learn MCP uses HTTP transport — no local process to install or manage. VS Code connects directly to the hosted endpoint.
 
 2. Verify it's running (**MCP: List Servers**), then try:
 
@@ -894,6 +920,339 @@ Building your own MCP is the load-bearing skill — but most teams will spend mo
    Copilot fetches real documentation pages and cites them — answers are grounded in source material, not just training data.
 
 > 🪧 **Note:** The MCP world is large. We only covered **tools** today; MCP also supports **resources** (files/URIs the model can read) and **prompts** (reusable prompt templates the server exposes). Browse the [MCP registry](https://github.com/mcp) for hundreds of community servers — GitHub, Postgres, Sentry, Playwright, and more.
+
+---
+
+## Phase 5b: Agent Hooks (Preview)
+
+Everything you've built so far — instructions, prompt files, agents, skills, MCP servers — guides Copilot through text. Agent Hooks let you go one step further: **run real shell code** at defined points in the agent lifecycle, so validation and context injection happen automatically, not just when you remember to ask.
+
+> ⚠️ **Preview feature.** Agent Hooks require VS Code 1.100+ and are gated behind the `chat.useCustomAgentHooks` setting. Behavior may change before GA.
+
+### 📖 Theory: Hook Basics
+
+| Concept | Details |
+| ------- | ------- |
+| **Lifecycle events** | `UserPromptSubmit`, `PostToolUse`, `PreToolUse`, `AgentStart`, `AgentStop`, `SubagentStart`, `SubagentStop`, `Error` |
+| **Scope** | **Workspace** — `.github/hooks/*.json`, loaded for every chat session in the repo; **Agent** — `hooks:` block in `.agent.md` frontmatter, loaded only when that agent is active; **Personal** — user-settings hooks, outside this lab |
+| **Input** | The hook process receives a JSON object on **stdin** with fields like `hookEventName`, `tool_name`, `tool_input`, `tool_response`, and `prompt` |
+| **Output** | Write JSON to **stdout** with `hookSpecificOutput.additionalContext` to inject context, `systemMessage` for a user-visible message, or `continue: false` to abort |
+| **Exit codes** | `0` = success; non-zero = hook error (Copilot surfaces a warning) |
+
+Two hooks will enforce quality in this project:
+
+1. **`PostToolUse` (workspace scope)** — After every file edit, validate that `activities.json` is still valid JSON and follows the schema. Fires for all agents.
+2. **`UserPromptSubmit` (agent scope, `activities-implementer` only)** — Before Copilot calls any tool, check whether the prompt mentions a quoted activity name that doesn't exist yet, and offer to create it with `/new-activity`.
+
+---
+
+### Activity 1 — Workspace-scoped PostToolUse validation hook
+
+**Goal:** Automatically catch `activities.json` schema errors the moment any agent edits the file.
+
+#### Step 0 — Enable the preview setting
+
+*Agent Hooks is a preview feature that must be explicitly opted in to. Adding this setting activates hook loading for the workspace.*
+
+1. Open `.vscode/settings.json` at the workspace root. If the file doesn't exist yet, create it.
+
+2. Add or update the file so it contains:
+
+   ```json
+   {
+     "chat.useCustomAgentHooks": true
+   }
+   ```
+
+3. Save the file and **reload the VS Code window** (`Ctrl+Shift+P` → *Developer: Reload Window*) so the new setting takes effect.
+
+#### Step 1 — Create the validation script
+
+*The hook runs a Python script — keeping the logic in a `.py` file instead of an inline shell command makes it easy to test, version, and extend.*
+
+1. Create the required folder structure inside `.github/`:
+
+   ```
+   .github/
+   └── hooks/
+       └── scripts/
+   ```
+
+   You can do this from the VS Code Explorer (right-click → **New Folder**) or from a terminal:
+
+   ```bash
+   mkdir -p .github/hooks/scripts
+   ```
+
+2. Inside `.github/hooks/scripts/`, create a new file called **`validate_activities.py`** and paste the following content:
+
+   ```python
+   #!/usr/bin/env python3
+   """PostToolUse hook: validate activities.json after any file edit.
+
+   VS Code sends a JSON object via stdin describing the tool call that just
+   finished. This script checks whether activities.json is still valid JSON
+   and follows the expected schema, then writes feedback to stdout that Copilot
+   injects into the conversation context.
+   """
+   import json
+   import pathlib
+   import sys
+
+   data = json.loads(sys.stdin.read())
+
+   # Only run when the agent edited a file — ignore unrelated tool calls
+   if data.get("tool_name") not in (
+       "editFiles",
+       "create_file",
+       "replace_string_in_file",
+       "insert_edit_into_file",
+   ):
+       sys.exit(0)
+
+   activities_file = pathlib.Path("app/backend/data/activities.json")
+   if not activities_file.exists():
+       sys.exit(0)
+
+   try:
+       activities = json.loads(activities_file.read_text(encoding="utf-8"))
+   except json.JSONDecodeError as exc:
+       print(
+           json.dumps(
+               {
+                   "hookSpecificOutput": {
+                       "hookEventName": "PostToolUse",
+                       "additionalContext": (
+                           f"⚠️ activities.json is invalid JSON after your edit: {exc}. "
+                           "Fix the syntax before continuing."
+                       ),
+                   }
+               }
+           )
+       )
+       sys.exit(0)
+
+   errors = []
+   for name, entry in activities.items():
+       if not isinstance(entry.get("max_participants"), int):
+           errors.append(f"'{name}': max_participants must be an integer, not a string.")
+       if not isinstance(entry.get("participants"), list):
+           errors.append(f"'{name}': participants must be an array.")
+
+   if errors:
+       print(
+           json.dumps(
+               {
+                   "hookSpecificOutput": {
+                       "hookEventName": "PostToolUse",
+                       "additionalContext": (
+                           "⚠️ activities.json has schema issues after your last edit: "
+                           + "; ".join(errors)
+                           + " Fix these before continuing."
+                       ),
+                   }
+               }
+           )
+       )
+   ```
+
+   What the script does:
+   - **Ignores** tool calls that are not file edits (searches, MCP calls, etc.) so it stays silent when not needed.
+   - **Reports** a clear error message if the JSON syntax is broken after an edit.
+   - **Checks** every entry for the two most common schema violations: `max_participants` as a string and `participants` as a non-array.
+
+#### Step 2 — Create the workspace hook configuration file
+
+*VS Code discovers workspace hooks from any `*.json` file inside `.github/hooks/`. Separating concerns into named files (one per guard) keeps hook configuration readable as the project grows.*
+
+1. Inside `.github/hooks/`, create a new file called **`activities-guard.json`** and paste the following content:
+
+   ```json
+   {
+     "hooks": {
+       "PostToolUse": [
+         {
+           "type": "command",
+           "command": "python .github/hooks/scripts/validate_activities.py",
+           "windows": "python .github/hooks/scripts/validate_activities.py"
+         }
+       ]
+     }
+   }
+   ```
+
+   > 💡 The `windows` key provides the same command and ensures the correct Python executable name is used on Windows. On macOS/Linux the `command` key is used.
+
+2. Verify the final directory layout looks like this:
+
+   ```
+   .github/
+   └── hooks/
+       ├── activities-guard.json        ← discovered automatically by VS Code
+       └── scripts/
+           └── validate_activities.py
+   ```
+
+#### Step 3 — Test the validation hook
+
+*Deliberately breaking the file confirms the hook fires and that Copilot self-corrects from the injected context — that's the only way to trust automation.*
+
+1. Open `app/backend/data/activities.json`.
+2. Change any `max_participants` value from a number to a string (e.g., `"20"`).
+3. Save the file.
+4. Open GitHub Copilot Chat and send any message (e.g., "What activities are available?").
+5. Observe that Copilot's next response acknowledges the schema issue and offers to fix it.
+6. Revert your deliberate change.
+
+---
+
+### Activity 2 — Agent-scoped UserPromptSubmit hook: inject library versions
+
+**Goal:** Before the `activities-implementer` agent executes any tool call, automatically inject the installed versions of the project's Python dependencies as context. This lets Copilot make version-aware decisions — for example, using the correct FastAPI route syntax, Pydantic model APIs, and pytest fixtures for the exact versions installed in the virtual environment.
+
+#### Step 1 — Understand why UserPromptSubmit is the right hook for this
+
+*`PostToolUse` fires only after a tool completes. Injecting library context at that point is too late — Copilot has already chosen its approach. `UserPromptSubmit` fires before any tool is called, giving Copilot the version information it needs to plan correctly from the very first step.*
+
+The hook uses Python's standard `importlib.metadata` module to query the installed version of each dependency declared in `requirements.txt`. The result is injected as `additionalContext` so Copilot knows — for every request — which APIs and features are actually available.
+
+#### Step 2 — Create the hook script
+
+*Using `importlib.metadata` (stdlib since Python 3.8) avoids shelling out to `pip` and works inside any virtual environment that has the packages installed.*
+
+1. Inside `.github/hooks/scripts/`, create a new file called **`inject_library_versions.py`** and paste the following content:
+
+   ```python
+   #!/usr/bin/env python3
+   """UserPromptSubmit hook (scoped to activities-implementer):
+
+   Inject the installed versions of project dependencies as additionalContext
+   before the agent executes any tool. Copilot uses this information to choose
+   only APIs and patterns that are valid for the exact versions installed —
+   avoiding deprecated methods or features introduced in later releases.
+
+   Also emits a systemMessage so the version summary is visible in the chat
+   before Copilot replies, confirming the hook fired.
+
+   VS Code sends the prompt via stdin as a JSON object; this script writes
+   a JSON response to stdout regardless of the prompt content.
+   """
+   import importlib.metadata
+   import json
+   import platform
+   import sys
+
+   PACKAGES = ["fastapi", "uvicorn", "pydantic", "pytest"]
+
+   versions: dict[str, str] = {}
+   for pkg in PACKAGES:
+       try:
+           versions[pkg] = importlib.metadata.version(pkg)
+       except importlib.metadata.PackageNotFoundError:
+           versions[pkg] = "not installed"
+
+   python_version = platform.python_version()
+   version_lines = "\n".join(f"- {pkg}: {ver}" for pkg, ver in versions.items())
+
+   context = (
+       f"This project's installed dependency versions are:\n"
+       f"- python: {python_version}\n"
+       f"{version_lines}\n\n"
+       "When writing or modifying backend code, use only APIs and features "
+       "compatible with these exact versions. Do not use methods, parameters, "
+       "or decorators that were deprecated or removed in any of these versions, "
+       "and do not assume features available only in newer releases."
+   )
+
+   # Read stdin to satisfy the hook contract (VS Code always sends JSON).
+   sys.stdin.read()
+
+   summary = f"python {python_version} | " + " | ".join(
+       f"{pkg} {ver}" for pkg, ver in versions.items()
+   )
+
+   print(
+       json.dumps(
+           {
+               "systemMessage": f"🔍 Versions injected into context: {summary}",
+               "hookSpecificOutput": {
+                   "hookEventName": "UserPromptSubmit",
+                   "additionalContext": context,
+               },
+           }
+       )
+   )
+   ```
+
+   Key points about this script:
+   - `importlib.metadata.version(pkg)` reads the installed version directly from the package metadata — no subprocess or network call needed.
+   - The `PACKAGES` list now includes `pydantic` alongside `fastapi`, `uvicorn`, and `pytest`, so Copilot is informed about Pydantic's major version and can generate models using the correct syntax (v1 vs v2).
+   - The script emits a **`systemMessage`** (a visible info banner in Copilot Chat) alongside the silent `additionalContext`, so you can confirm at a glance that the hook fired and which versions were injected.
+   - The script always produces output, so Copilot is always aware of the versions before it acts.
+   - To track a new dependency, just add its name to the `PACKAGES` list.
+
+#### Step 3 — Add the hook to the agent frontmatter
+
+*Agent-scoped hooks are declared directly in the `.agent.md` frontmatter. Scoping to `activities-implementer` ensures version context is injected only when working on this project's backend — not in unrelated chat sessions.*
+
+1. Open `.github/agents/activities-implementer.agent.md`.
+
+2. The file starts with a YAML frontmatter block between `---` markers. Add the `hooks:` block so the complete frontmatter looks like this:
+
+   ```yaml
+   ---
+   name: activities-implementer
+   description: Applies activity changes to activities.json following project conventions.
+   hooks:
+     UserPromptSubmit:
+       - type: command
+         command: "python .github/hooks/scripts/inject_library_versions.py"
+         windows: "python .github/hooks/scripts/inject_library_versions.py"
+   ---
+   ```
+
+3. Save the file. Leave everything below the closing `---` (the agent body) exactly as it is.
+
+#### Step 4 — Test the hook
+
+*A quick sanity-check confirms the chain works: user prompt → hook fires → a visible banner shows the versions → Copilot uses those versions to produce compatible code.*
+
+> 💡 The hook now emits both a **`systemMessage`** (a visible info banner in the chat) and **`additionalContext`** (silent context injected into Copilot's prompt). The banner is the confirmation you can see; the context is what guides Copilot's decisions. Keep in mind that `additionalContext` is injected silently — it does not appear in any panel. 
+
+1. Switch to the **`activities-implementer`** agent in GitHub Copilot Chat.
+
+2. Send any prompt — for example:
+   ```prompt
+   Write a parametrized pytest test for the GET /activities endpoint that checks
+   the response schema, using fixtures and syntax compatible with our installed
+   pytest and FastAPI versions.
+   ```
+
+3. **Before Copilot replies**, look for the system message banner directly above the response. It will read:
+   ```
+   🔍 Versions injected into context: python X.X.X | fastapi X.X.X | uvicorn X.X.X | pydantic X.X.X | pytest X.X.X
+   ```
+   This confirms the hook fired and the exact installed versions were passed to Copilot.
+
+4. Inspect Copilot's generated test. It should use the `TestClient` pattern (FastAPI's synchronous test helper) and `pytest` fixtures that are valid for the installed version — not patterns from a different major release (e.g., no Pydantic v1 `class Config` if v2 is installed, no `@pytest.mark.asyncio` unless an async test framework is present).
+
+5. **Optional — stress-test version awareness:** Ask Copilot directly:
+   ```prompt
+   What exact Python and library versions are you working with in this project?
+   ```
+   Copilot should answer with the version numbers from the banner without reading any file, because the hook already injected them as context.
+
+6. **Optional — observe version-driven differences:** Temporarily edit the `PACKAGES` list in `.github/hooks/scripts/inject_library_versions.py` to remove `pydantic`, save, and send another prompt. Notice that Copilot no longer mentions Pydantic compatibility in its plan. Re-add it when done.
+
+<details>
+<summary>🔧 Troubleshooting</summary>
+
+- **Hook not firing?** Verify `"chat.useCustomAgentHooks": true` is in `.vscode/settings.json` and reload the VS Code window.
+- **Python not found on PATH?** Make sure your virtual environment is activated, or replace `python` with the full path to the interpreter in both the `command` and `windows` fields.
+- **`PackageNotFoundError` for a package?** The package is not installed in the active environment — run `pip install -r requirements.txt` first.
+- **Test the script in isolation:** `echo "{}" | python .github/hooks/scripts/inject_library_versions.py` — you should see a JSON object with `additionalContext` containing the version list.
+
+</details>
 
 ---
 
@@ -1020,6 +1379,8 @@ If this setting is grayed out, your org admin controls it.
 
 **Registering the plugin path for local development:**
 
+Add this to `.vscode/settings.json` (alongside `chat.plugins.enabled`):
+
 ```json
 {
   "chat.pluginLocations": {
@@ -1033,6 +1394,58 @@ If this setting is grayed out, your org admin controls it.
 1. The `activities-implementer` agent shows up in the agent picker.
 2. **MCP: List Servers** lists `school-activities` (auto-started by the plugin).
 3. `list_activities` and `get_signups_count` appear in **Configure Tools**.
+
+**Testing the plugin from a separate workspace:**
+
+`chat.pluginLocations` accepts absolute paths, so you can load the plugin into any workspace without moving or copying any files. This lets you simulate exactly what another developer would experience after installing it.
+
+1. Open VS Code in a **new, empty folder** (File → Open Folder → pick or create an empty directory).
+2. Create `.vscode/settings.json` in that folder with an absolute path to your `my-school-plugin/` directory. Replace the placeholder with the actual path on your machine:
+
+```json
+{
+  "chat.plugins.enabled": true,
+  "chat.pluginLocations": {
+    "/absolute/path/to/your/my-school-plugin": true
+  }
+}
+```
+
+> 🪟 **Windows example:** `"C:\\Users\\you\\projects\\customize-copilot\\my-school-plugin": true`
+> 🍎 **macOS/Linux example:** `"/home/you/projects/customize-copilot/my-school-plugin": true`
+
+3. Reload the window (**Developer: Reload Window** from the Command Palette).
+4. Verify in the new workspace:
+   - `activities-implementer` appears in the agent picker (@ menu in the Chat view).
+   - **MCP: List Servers** shows `school-activities` started.
+   - **Configure Tools** lists `list_activities` and `get_signups_count`.
+5. Ask `@activities-implementer` a question — it should answer using tools from the MCP server even though the new workspace contains no source code at all.
+
+> **Note:** The `command: "python"` in `my-school-plugin/.mcp.json` relies on `python` being on the system PATH. If the server fails to start in the new workspace, use the absolute path to the venv interpreter instead (e.g. `C:\\path\\to\\your\\.venv\\Scripts\\python.exe` on Windows or `/path/to/your/.venv/bin/python` on macOS/Linux).
+
+**Alternative: publish to Git and install from source**
+
+If `chat.pluginLocations` doesn't load the plugin (it's a preview feature and may behave differently across VS Code versions), publish the plugin to a Git repository and install it properly instead:
+
+1. Initialize a Git repo inside `my-school-plugin/`, commit the files, and push to a new remote:
+
+   ```bash
+   cd my-school-plugin
+   git init
+   git add .
+   git commit -m "initial plugin"
+   gh repo create my-school-plugin --public --source=. --remote=origin --push
+   ```
+
+2. In any workspace, open the Command Palette and run **Chat: Install Plugin From Source**, then enter your repository URL:
+
+   ```
+   https://github.com/YOUR-USERNAME/my-school-plugin
+   ```
+
+3. VS Code clones the plugin into its own cache (`%APPDATA%\Code\agentPlugins\` on Windows) and registers it globally — no path configuration needed. The plugin will now appear in **Extensions: Agent Plugins** and work in every workspace.
+
+> **Why this matters:** `chat.pluginLocations` is a development-only shortcut. Publishing to Git is how your plugin would actually reach other developers — they install it once and it works everywhere on their machine, isolated from your source files.
 
 **Where this is going (production):**
 
@@ -1059,6 +1472,7 @@ You've completed **Lab 02 — Customizing GitHub Copilot**! Here's a recap of wh
 | **Phase 3** | Defined two custom agents (`activities-planner` read-only and `activities-implementer`) and chained them with handoffs |
 | **Phase 4** | Installed Anthropic's `pdf` agent skill and used it to generate real PDFs (rosters, handbook) directly from `activities.json` |
 | **Phase 5** | Wrote and registered the `school-activities` MCP server in Python and drove it from Copilot with chained tool calls |
+| **Phase 5b** | Created a workspace-scoped JSON validation hook and an agent-scoped `UserPromptSubmit` hook on `activities-implementer` that detects unknown activities and offers to create them via `/new-activity` |
 | **Phase 6** | Bundled the custom agent + MCP server into a `my-school-plugin/` plugin package ready for distribution |
 
 ### Key Takeaways
@@ -1072,5 +1486,6 @@ You've completed **Lab 02 — Customizing GitHub Copilot**! Here's a recap of wh
 - **Custom agents** (`*.agent.md`) bundle persona, tool restrictions, model preference, and handoffs into one selectable role — and compose with instructions, prompt files, and agent skills.
 - **Agent Skills** (`SKILL.md`) bundle on-demand expertise plus supporting files (scripts, references) that Copilot loads only when the task matches the skill's `description` — enabling progressive disclosure of large knowledge bases.
 - **MCP servers** expose data and capabilities Copilot can't reach on its own — each one is an isolated process with its own tool surface.
+- **Agent hooks** fire at defined lifecycle points and execute real shell code — deterministic automation that complements natural-language instructions.
 - **Plugins** bundle agents, MCP servers, skills, and hooks into a single distributable package — the unit of sharing across teams and the community.
 - **Agent Mode** can create the instruction files, prompt files, agents, agent skills, MCP servers, and plugin manifests themselves — let Copilot do the heavy lifting!
