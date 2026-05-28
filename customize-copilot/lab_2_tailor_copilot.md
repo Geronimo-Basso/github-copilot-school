@@ -923,6 +923,18 @@ Everything you've built so far — instructions, prompt files, agents, skills, M
 
 > ⚠️ **Preview feature.** Agent Hooks require VS Code 1.100+ and are gated behind the `chat.useCustomAgentHooks` setting. Behavior may change before GA.
 
+Before continuing, enable hooks for this workspace:
+
+1. Create or open `.vscode/settings.json`.
+2. Add:
+
+   ```json
+   {
+     "chat.useCustomAgentHooks": true
+   }
+   ```
+
+3. Reload the VS Code window (`Ctrl+Shift+P` → **Developer: Reload Window**).
 ### 📖 Theory: The hook lifecycle
 
 A hook is a command (any executable — a shell one-liner, a Python script, a Node script…) that VS Code runs when a specific lifecycle event fires. The command reads JSON from `stdin` and can print JSON to `stdout` to influence what happens next — block a tool call, append context to the prompt, show a banner, etc.
