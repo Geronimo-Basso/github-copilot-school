@@ -40,7 +40,9 @@ We'll keep building on the same project from Lab 01 — the **GitHub Copilot Hig
 
 2. Verify the **GitHub Copilot** and **Python** extensions are installed and enabled.
 
-3. From the **workspace root**, create and activate a virtual environment:
+3. Install the **GitHub Copilot CLI** (`copilot` command) by following the official guide: [Installing GitHub Copilot in the CLI](https://docs.github.com/en/copilot/managing-copilot/configure-personal-settings/installing-github-copilot-in-the-cli). Then authenticate before continuing by launching `copilot` and running `/login` (see [Authenticating with Copilot CLI](https://docs.github.com/en/copilot/managing-copilot/configure-personal-settings/installing-github-copilot-in-the-cli#authenticating-with-copilot-cli)).
+
+4. From the **workspace root**, create and activate a virtual environment:
 
    - **macOS / Linux:**
 
@@ -56,19 +58,19 @@ We'll keep building on the same project from Lab 01 — the **GitHub Copilot Hig
      venv\Scripts\activate
      ```
 
-4. Install the dependencies:
+5. Install the dependencies:
 
    ```bash
    pip install -r requirements.txt
    ```
 
-5. Start the development server from the workspace root:
+6. Start the development server from the workspace root:
 
    ```bash
    uvicorn app.backend.app:app --reload
    ```
 
-6. Open your browser at **http://127.0.0.1:8000** and confirm the activities page loads.
+7. Open your browser at **http://127.0.0.1:8000** and confirm the activities page loads.
 
    > ❕ **Important:** Keep the server running throughout the lab so you can see live changes after each step.
 
