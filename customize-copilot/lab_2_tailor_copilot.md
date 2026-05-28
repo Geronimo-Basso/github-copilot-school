@@ -1142,160 +1142,77 @@ my-plugin/
 
 > 🪧 **Security note:** Plugins can contain hooks and MCP servers that execute code. Always review the contents of a plugin before installing.
 
-### Activity: Package your work as a plugin 📦
+Rather than building one from scratch, in this phase you'll **install and explore a community plugin** to feel how plugins are actually distributed and consumed.
 
-You'll bundle the **`activities-implementer`** custom agent (from Phase 3) and the **`school-activities`** MCP server (from Phase 5) into a single `my-school-plugin/` directory.
+### 📖 Theory: The `awesome-copilot` marketplace
 
-1. **Create the plugin root** at the workspace root:
+[`github/awesome-copilot`](https://github.com/github/awesome-copilot) is the **community-curated marketplace** of GitHub Copilot customizations — agents, instructions, skills, hooks, agentic workflows, and full plugins, all sourced from third-party contributors and reviewed by the GitHub community.
 
-   ```bash
-   mkdir my-school-plugin
-   ```
+Two things make it especially relevant to this phase:
 
-2. **Create `my-school-plugin/plugin.json`** with the manifest:
+- **It's pre-registered.** The marketplace is already wired into the Copilot CLI and VS Code, so installing a plugin is a one-liner — no Git URLs, no `chat.pluginLocations`, no manual setup.
+- **It's a real plugin registry.** Browsing [`/plugins`](https://github.com/github/awesome-copilot/tree/main/plugins) shows ~60 plugins covering MCP development in every major language (Python, TypeScript, Go, Java, Rust…), security best practices, testing automation, project documentation, framework upgrades (React 18→19), Azure, Power Platform, and more. It's where you'd shop for ready-made expertise before building your own.
 
-   ```json
-   {
-     "name": "my-school-plugin",
-     "description": "Activities implementer agent and school-activities MCP server for the GitHub Copilot High School app",
-     "version": "0.1.0",
-     "author": {
-       "name": "Your Name"
-     },
-     "agents": "agents/",
-     "mcpServers": ".mcp.json"
-   }
-   ```
+> 💡 **Tip:** The full collection (agents, skills, instructions, hooks, workflows) is browsable on the website [awesome-copilot.github.com](https://awesome-copilot.github.com/), with full-text search and filtering.
 
-3. **Copy the custom agent into the plugin:**
+### Activity: Install the `awesome-copilot` meta plugin 📥
+
+The most useful plugin to start with is `awesome-copilot` itself — a **meta plugin** that helps you discover and install other items from the marketplace, tailored to *your* current repository.
+
+1. **Install the plugin** from your terminal:
 
    ```bash
-   mkdir my-school-plugin/agents
-   cp .github/agents/activities-implementer.agent.md \
-      my-school-plugin/agents/activities-implementer.agent.md
+   copilot plugin install awesome-copilot@awesome-copilot
    ```
 
-   > 💡 **Note:** You're moving a copy of the agent from Phase 3 into the plugin structure. The file stays identical — same frontmatter, same system prompt.
+   > 🪧 If you see an error that the marketplace is unknown, register it once with `copilot plugin marketplace add github/awesome-copilot` and re-run the install command.
 
-4. **Create `my-school-plugin/.mcp.json`** to reference the MCP server you built in Phase 5:
+2. **Reload the VS Code window** (`⇧⌘P` / `Ctrl+Shift+P` → **Developer: Reload Window**) so Copilot picks up the new commands and agent.
 
-   ```json
-   {
-     "mcpServers": {
-       "school-activities": {
-         "type": "stdio",
-         "command": "python",
-         "args": ["-m", "mcp_servers.school_activities_server"]
-       }
-     }
-   }
-   ```
+**What you just installed:**
 
-   > 🪧 **Key differences from `.vscode/mcp.json`:**
+The `awesome-copilot` plugin ships four slash commands and one custom agent.
+
+**Slash commands** — meta-prompts that scan your repo and suggest matching items from the marketplace, avoiding duplicates with what you already have and flagging outdated copies:
+
+| Slash command | What it suggests |
+| ------------- | ---------------- |
+| `/awesome-copilot:suggest-awesome-github-copilot-collections` | Curated **collections** (bundles of related assets) relevant to this repo |
+| `/awesome-copilot:suggest-awesome-github-copilot-instructions` | **Instruction files** that match your codebase's stack and conventions |
+| `/awesome-copilot:suggest-awesome-github-copilot-agents` | **Custom agents** that fit the workflows in this repo |
+| `/awesome-copilot:suggest-awesome-github-copilot-skills` | **Agent skills** relevant to the technologies you use |
+
+**Custom agent:**
+
+| Agent | Purpose |
+| ----- | ------- |
+| `meta-agentic-project-scaffold` | Meta agent that helps you create and manage agentic project workflows |
+
+### Activity: Discover customizations tailored to this repo 🔎
+
+This is where the meta plugin earns its keep — it analyzes the workspace you have open and recommends concrete items from the marketplace.
+
+1. Open **Copilot Chat** in **Agent** mode.
+
+2. Run one of the slash commands, for example:
+
+   > ![Static Badge](https://img.shields.io/badge/-Prompt-text?style=social&logo=github%20copilot)
    >
-   > - Top-level key is `mcpServers` (not `servers`).
-   > - `command` is simply `"python"` (not an absolute venv path). In a real distributed plugin you'd either bundle a runtime, document a Python version requirement, or use `npx` for a JavaScript MCP server. For this lab, assume the user has Python in their PATH.
+   > ```prompt
+   > /awesome-copilot:suggest-awesome-github-copilot-instructions
+   > ```
 
-> 💡 **Stretch goal — bundle the Phase 6 hook too.** Plugins can also ship hooks. To include the `UserPromptSubmit` hook you built in Phase 6, copy `.github/hooks/inject-library-versions.json` and `.github/hooks/scripts/inject_library_versions.py` into a `hooks/` folder inside `my-school-plugin/`, add `"hooks": "hooks/inject-library-versions.json"` to `plugin.json`, and update the `command` paths in the JSON so they resolve relative to the plugin's own location. Anyone installing your plugin then gets the library-version context injection for free, with no extra setup.
+3. Copilot will:
+   - Inspect the repo (a Python/FastAPI activities portal with a vanilla JS frontend).
+   - Compare against what's already in `.github/` from previous phases.
+   - Propose specific instruction files from the marketplace (e.g., FastAPI conventions, Python style, security best practices) and offer to download them.
 
-**🎯 Goal: A self-contained `my-school-plugin/` directory at the workspace root with a valid `plugin.json` manifest, the custom agent inside `agents/`, and the MCP server definition in `.mcp.json`. ✅**
+4. Repeat with `/awesome-copilot:suggest-awesome-github-copilot-agents` and `/awesome-copilot:suggest-awesome-github-copilot-skills` to see what agents and skills the marketplace recommends for this exact codebase.
 
-### Install & verify (read-through) 🔍
+   > 💡 **Tip:** You don't have to install everything it suggests. Treat the output as a curated reading list — pick the one or two that solve a real problem you have today.
 
-> 📖 **Read-through** — how VS Code would discover and load your plugin.
+**🎯 Goal: A community plugin is installed via the `awesome-copilot` marketplace, its slash commands appear in Copilot Chat, and you've used the meta-prompts to surface real, repo-specific recommendations from the marketplace. ✅**
 
-Plugins are in preview and the local-install flow is fiddly. Here's what the path looks like end-to-end so you know where this is going.
-
-**Enabling plugin support.** Add to `.vscode/settings.json`:
-
-```json
-{
-  "chat.plugins.enabled": true
-}
-```
-
-If this setting is grayed out, your org admin controls it.
-
-**Registering the plugin path for local development:**
-
-Add this to `.vscode/settings.json` (alongside `chat.plugins.enabled`):
-
-```json
-{
-  "chat.pluginLocations": {
-    "${workspaceFolder}/my-school-plugin": true
-  }
-}
-```
-
-**What you'd see after reloading the window:**
-
-1. The `activities-implementer` agent shows up in the agent picker.
-2. **MCP: List Servers** lists `school-activities` (auto-started by the plugin).
-3. `list_activities` and `get_signups_count` appear in **Configure Tools**.
-
-**Testing the plugin from a separate workspace:**
-
-`chat.pluginLocations` accepts absolute paths, so you can load the plugin into any workspace without moving or copying any files. This lets you simulate exactly what another developer would experience after installing it.
-
-1. Open VS Code in a **new, empty folder** (File → Open Folder → pick or create an empty directory).
-2. Create `.vscode/settings.json` in that folder with an absolute path to your `my-school-plugin/` directory. Replace the placeholder with the actual path on your machine:
-
-```json
-{
-  "chat.plugins.enabled": true,
-  "chat.pluginLocations": {
-    "/absolute/path/to/your/my-school-plugin": true
-  }
-}
-```
-
-> 🪟 **Windows example:** `"C:\\Users\\you\\projects\\customize-copilot\\my-school-plugin": true`
-> 🍎 **macOS/Linux example:** `"/home/you/projects/customize-copilot/my-school-plugin": true`
-
-3. Reload the window (**Developer: Reload Window** from the Command Palette).
-4. Verify in the new workspace:
-   - `activities-implementer` appears in the agent picker (@ menu in the Chat view).
-   - **MCP: List Servers** shows `school-activities` started.
-   - **Configure Tools** lists `list_activities` and `get_signups_count`.
-5. Ask `@activities-implementer` a question — it should answer using tools from the MCP server even though the new workspace contains no source code at all.
-
-> **Note:** The `command: "python"` in `my-school-plugin/.mcp.json` relies on `python` being on the system PATH. If the server fails to start in the new workspace, use the absolute path to the venv interpreter instead (e.g. `C:\\path\\to\\your\\.venv\\Scripts\\python.exe` on Windows or `/path/to/your/.venv/bin/python` on macOS/Linux).
-
-**Alternative: publish to Git and install from source**
-
-If `chat.pluginLocations` doesn't load the plugin (it's a preview feature and may behave differently across VS Code versions), publish the plugin to a Git repository and install it properly instead:
-
-1. Initialize a Git repo inside `my-school-plugin/`, commit the files, and push to a new remote:
-
-   ```bash
-   cd my-school-plugin
-   git init
-   git add .
-   git commit -m "initial plugin"
-   gh repo create my-school-plugin --public --source=. --remote=origin --push
-   ```
-
-2. In any workspace, open the Command Palette and run **Chat: Install Plugin From Source**, then enter your repository URL:
-
-   ```
-   https://github.com/YOUR-USERNAME/my-school-plugin
-   ```
-
-3. VS Code clones the plugin into its own cache (`%APPDATA%\Code\agentPlugins\` on Windows) and registers it globally — no path configuration needed. The plugin will now appear in **Extensions: Agent Plugins** and work in every workspace.
-
-> **Why this matters:** `chat.pluginLocations` is a development-only shortcut. Publishing to Git is how your plugin would actually reach other developers — they install it once and it works everywhere on their machine, isolated from your source files.
-
-**Where this is going (production):**
-
-In production you'd publish the plugin to a Git repository and share it via:
-
-- **Plugin marketplaces** — e.g., [`github/awesome-copilot`](https://github.com/github/awesome-copilot). Users browse and install from the **Agent Plugins** view in the Extensions sidebar.
-- **Direct Git URL** — users install with **Chat: Install Plugin From Source** from the Command Palette.
-
-Local `chat.pluginLocations` is mostly for development and testing — once your plugin is ready, you push it to a Git repo and share the URL.
-
-**🎯 Goal: You understand how plugins bundle agents + MCP servers + skills + hooks into a single distributable package, what the `plugin.json` manifest looks like, and how VS Code discovers and loads them. ✅**
 
 ---
 
@@ -1312,7 +1229,7 @@ You've completed **Lab 02 — Customizing GitHub Copilot**! Here's a recap of wh
 | **Phase 4** | Used the bundled `pdf` agent skill to generate real PDFs (rosters, handbook) directly from `activities.json` |
 | **Phase 5** | Wrote and registered the `school-activities` MCP server in Python and drove it from Copilot with chained tool calls |
 | **Phase 6** | Created a workspace-scoped `UserPromptSubmit` hook that injects the project's real installed library versions into every prompt, so Copilot stops drifting toward APIs that aren't actually available |
-| **Phase 7** | Bundled the custom agent + MCP server into a `my-school-plugin/` plugin package ready for distribution |
+| **Phase 7** | Explored the plugin concept and installed a community plugin from `github/awesome-copilot` to see how plugins are distributed and consumed in practice |
 
 ### Key Takeaways
 
