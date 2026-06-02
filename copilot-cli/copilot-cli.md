@@ -9,15 +9,20 @@ Terminal-native AI assistant that runs in bash/zsh/PowerShell. Use it interactiv
 - [Part 1 — Theory](#part-1--theory)
   - [1.1 What Copilot CLI is](#11-what-copilot-cli-is)
   - [1.2 When to use CLI vs VS Code](#12-when-to-use-cli-vs-vs-code)
-  - [1.3 Interactive vs programmatic](#13-interactive-vs-programmatic)
-  - [1.4 Slash commands overview](#14-slash-commands-overview)
+  - [1.3 VS Code session model](#13-vs-code-session-model)
+  - [1.4 Interactive vs programmatic](#14-interactive-vs-programmatic)
+  - [1.5 Slash commands overview](#15-slash-commands-overview)
+  - [1.6 Automatic context management](#16-automatic-context-management)
 - [Part 2 — Core CLI Usage](#part-2--core-cli-usage)
   - [Exercise A — Install + auth + hello world](#exercise-a--install--auth--hello-world)
   - [Exercise B — Context management](#exercise-b--context-management)
   - [Exercise C — Slash commands deep dive](#exercise-c--slash-commands-deep-dive)
+  - [Exercise C.1 — /fleet for parallel subagent execution](#exercise-c1--fleet-for-parallel-subagent-execution)
   - [Exercise D — Permission flags & patterns](#exercise-d--permission-flags--patterns)
   - [Exercise E — Multi-turn autonomous task](#exercise-e--multi-turn-autonomous-task)
 - [Part 3 — Customization](#part-3--customization)
+  - [Part 3 overview — customization options at a glance](#part-3-overview--customization-options-at-a-glance)
+  - [Putting it together: choosing the right option](#putting-it-together-choosing-the-right-option)
   - [Custom instructions — CLI paths](#custom-instructions--cli-paths)
   - [Custom agents](#custom-agents)
   - [Hooks (read-through)](#hooks-read-through)
@@ -25,6 +30,7 @@ Terminal-native AI assistant that runs in bash/zsh/PowerShell. Use it interactiv
   - [Copilot memory via /chronicle](#copilot-memory-via-chronicle)
   - [CLI plugins](#cli-plugins)
   - [MCP — CLI config paths (read-through)](#mcp--cli-config-paths-read-through)
+  - [Agent orchestration — hand off from local agent to Copilot CLI](#agent-orchestration--hand-off-from-local-agent-to-copilot-cli)
 - [Part 4 — Programmatic & Automation](#part-4--programmatic--automation)
   - [Exercise F — Headless invocation](#exercise-f--headless-invocation)
 - [Q&A](#qa)
@@ -50,7 +56,7 @@ Get the boring stuff out of the way before the clock starts.
 
 ### Required ✅
 
-1. **Open this repository in your terminal.** All commands assume you're starting from the workspace root (`github-copilot-101/`).
+1. **Open this repository in your terminal.** All commands assume you're starting from the workspace root (`github-copilot-school/`).
 
 1. **Check that you have one of these package managers installed:**
 
@@ -94,9 +100,26 @@ Copilot CLI is a **terminal-native AI assistant** that runs in bash, zsh, or Pow
 - Workspace agents tied to `.github/agents/`
 - Real-time inline completions
 
-> 📌 **Key distinction:** The CLI is for **automation and headless workflows**. VS Code is for **interactive editing with visual feedback**.
+> 📌 **Overlap + decision rule:** Copilot CLI and Copilot Chat in VS Code can both explain code, review files, and propose edits.
+>
+> Use **CLI** when the workflow is terminal-first (SSH sessions, shell-heavy tasks, scripts, CI/CD, headless runs, or explicit permission controls).
+>
+> Use **Copilot Chat in VS Code** when the workflow is editor-first (visual multi-file edits, debugging loops, inline iteration, and quick UI feedback).
+>
+> **Rule of thumb:** If success depends mostly on commands and automation, start in CLI. If success depends mostly on editing and visual context, start in VS Code Chat.
 
-### 1.3 Interactive vs programmatic
+### 1.3 VS Code session model
+
+In addition to terminal-first usage, Copilot CLI can run as a **VS Code-managed background session**.
+
+- Start a Copilot CLI session from the Chat view (Session Target -> Copilot CLI) or Command Palette.
+- The session runs independently in the background on your local machine, while you keep working in the editor.
+- You can monitor progress, approvals, and follow-up prompts from the unified Chat view.
+- VS Code can keep tracking these sessions across windows, making this model useful for longer autonomous tasks.
+
+> 📌 **When to use this model:** Use VS Code-managed Copilot CLI sessions when you want autonomous execution plus visual session monitoring and easy follow-up in Chat.
+
+### 1.4 Interactive vs programmatic
 
 ```bash
 # Interactive (default mode)
@@ -117,7 +140,7 @@ copilot -p "Generate tests for @backend/app.py"
 - Output goes to stdout (no interactive session)
 - Perfect for CI/CD automation
 
-### 1.4 Slash commands overview
+### 1.5 Slash commands overview
 
 These are the CLI-specific commands you can use in interactive mode. We'll explore them in depth in Part 2 Exercise C.
 
@@ -138,6 +161,16 @@ These are the CLI-specific commands you can use in interactive mode. We'll explo
 - `/undo` — rewind last turn (revert file changes)
 
 > 📌 **Note:** There is **no** `/reset` or `/stop` command. Use `/clear` to start fresh, `/undo` to revert the last turn, or `/compact` to free up context space.
+
+### 1.6 Automatic context management
+
+GitHub Copilot CLI automatically manages your conversation context so long-running sessions remain usable.
+
+- **Auto-compaction:** When your conversation approaches roughly **95% of the token limit**, Copilot automatically compresses history in the background without interrupting your workflow.
+- **Manual control:** Use `/compact` anytime to compress context yourself. If you start compaction but change your mind, press **Escape** to cancel.
+- **Visualize usage:** Use `/context` to see a detailed token usage breakdown and understand how your context window is being used.
+
+> 📌 **Why this matters:** Auto-compaction plus manual `/compact` gives you near-continuous sessions without constantly restarting, while `/context` helps you decide when to compact proactively.
 
 ---
 
@@ -171,10 +204,10 @@ copilot --version
 **Step 2: Navigate to the `app/` folder**
 
 ```bash
-cd github-copilot-101/copilot-cli/app/
+cd app/
 ```
 
-This ensures the CLI has the FastAPI app from this lab's workspace as context for the next step. The full path works whether or not you're already in the repo.
+This ensures the CLI has the FastAPI app from this lab's workspace as context for the next step.
 
 **Step 3: Start interactive mode and authenticate**
 
@@ -211,7 +244,7 @@ Use `@` mentions and slash commands to control context.
 **Step 1: Start interactive mode**
 
 ```bash
-cd copilot-cli/app/
+cd app/
 copilot
 ```
 
@@ -255,6 +288,8 @@ Alias: `/new`.
 
 > 📌 **Important:** There is **no** `/reset`, `/stop`, or natural-language "remove context" command. Manage scope via `@` mentions per message and use `/compact` or `/clear` to reduce window pressure.
 
+> 📌 **Theory deep dive:** See [1.6 Automatic context management](#16-automatic-context-management) for how auto-compaction works and when to compact manually.
+
 **Step 5: Undo the last turn**
 
 If the CLI makes a change you want to revert, use:
@@ -290,11 +325,12 @@ The CLI ships with several slash commands for specialized workflows. This exerci
 - **`/delegate` does NOT invoke local sub-agents.** It hands the session to GitHub's cloud agent, which opens a PR on your behalf. For local parallel work, use `/fleet`.
 - **Skills are invoked via `@skill:skill-name` mentions** in prompts, not via a `/skills invoke` subcommand. The `/skills` command is for *managing* skills (list/info/add/remove), not invoking them.
 - **`/chronicle` requires enabling experimental features first:** `/experimental on` (covered in Part 3).
+- **`/fleet` deep dive is covered in Exercise C.1** right after this section.
 
 **Step 1: Use `/plan` to preview work**
 
 ```bash
-cd copilot-cli/app/
+cd app/
 copilot
 ```
 
@@ -331,6 +367,64 @@ Type `exit` to quit.
 
 ---
 
+### Exercise C.1 — /fleet for parallel subagent execution
+
+🛠️ **Hands-on (10–15 min)**
+
+Use `/fleet` when you want Copilot to split work into parallel tracks and run them concurrently.
+
+**When `/fleet` is a good fit:**
+- You want multiple perspectives at once (e.g., backend review + frontend review + test strategy)
+- You need a faster first pass before deciding where to go deeper
+- The task can be decomposed into mostly independent streams
+
+**Step 1: Start a fresh interactive session**
+
+```bash
+cd app/
+copilot
+```
+
+**Step 2: Run a parallel review workflow**
+
+At the prompt, run:
+
+```prompt
+> /fleet Review @backend/app.py for API and validation issues, Review @frontend/app.js for UX/state issues, and propose test cases for @backend/app.py
+```
+
+Copilot dispatches parallel subagents and then merges their outputs into one response.
+
+**Step 3: Compare with `/research` and `/delegate`**
+
+Use this quick decision rule:
+
+| Need | Best command |
+|------|--------------|
+| Parallel local analysis/execution in your current session | `/fleet` |
+| Deep external investigation across GitHub/web sources | `/research` |
+| Hand off to GitHub cloud agent to continue work and open a PR | `/delegate` |
+
+**Step 4: Validate one fleet result**
+
+Pick one recommendation from the `/fleet` output and ask Copilot to verify it with concrete evidence:
+
+```prompt
+> Validate the backend finding and show the exact code location in @backend/app.py
+```
+
+**Step 5: Handle partial failures**
+
+If one parallel branch fails (for example, due to missing context), rerun `/fleet` with tighter prompts:
+
+```prompt
+> /fleet Review only @backend/app.py routes and input validation; ignore frontend
+```
+
+> ✅ **You should now see:** Multiple parallel perspectives in one response, a clear sense of when `/fleet` is better than `/research` or `/delegate`, and a repeatable pattern for decomposing complex tasks.
+
+---
+
 ### Exercise D — Permission flags & patterns
 
 🛠️ **Hands-on**
@@ -350,7 +444,7 @@ The CLI uses **permission patterns** to control what tools the model can use. Pa
 **Step 1: Allow all tools (no prompts)**
 
 ```bash
-cd copilot-cli/app/
+cd app/
 copilot --allow-all-tools
 ```
 
@@ -415,7 +509,7 @@ Now tie everything together: use the CLI in **autopilot mode** to build a featur
 **Step 1: Run the task in autopilot mode**
 
 ```bash
-cd copilot-cli/app/
+cd app/
 copilot --mode autopilot -i "Build a waitlist feature in @backend and @frontend. Add a backend endpoint for waitlist signup and update the frontend to show 'Join Waitlist' when an activity is full."
 ```
 
@@ -426,8 +520,8 @@ copilot --mode autopilot -i "Build a waitlist feature in @backend and @frontend.
 The CLI will:
 1. Read the existing code
 2. Plan the changes (backend endpoint + frontend logic)
-3. Edit `app/backend/app.py` (add `/activities/{name}/waitlist` endpoint)
-4. Edit `app/frontend/index.html` or `app/frontend/script.js` (add waitlist button logic)
+3. Edit `backend/app.py` (add `/activities/{name}/waitlist` endpoint)
+4. Edit `frontend/index.html` or `frontend/app.js` (add waitlist button logic)
 5. Run tests (if they exist) or start the server to verify
 6. Iterate if anything fails
 
@@ -439,7 +533,7 @@ Start the server:
 uvicorn backend.app:app --reload
 ```
 
-Open `app/frontend/index.html` in your browser (or use Live Server). Try to sign up for an activity with 30 participants already signed up.
+Open `frontend/index.html` in your browser (or use Live Server). Try to sign up for an activity with 30 participants already signed up.
 
 > ✅ **You should now see:** The 31st signup attempt shows a "Join Waitlist" button instead of "Sign Up". The backend has a new `/activities/{name}/waitlist` endpoint (verify with `curl -X POST http://127.0.0.1:8000/activities/Chess%20Club/waitlist?email=test@example.com`).
 
@@ -459,6 +553,35 @@ copilot
 ## Part 3 — Customization
 
 The CLI inherits many of the customization features from VS Code — custom agents, skills, MCP servers, and plugins — but with different file paths and invocation patterns. This section maps the CLI equivalents.
+
+### Part 3 overview — customization options at a glance
+
+You can customize GitHub Copilot CLI in multiple ways depending on whether you need policy, specialization, tool access, or packaged functionality.
+
+| Option | What it is | Best when you want | Learn more |
+|--------|------------|--------------------|------------|
+| **Custom instructions** | Additional instructions about your project, build/test/validation expectations, and coding preferences. Instruction files are combined rather than priority-fallback. | Copilot to consistently follow repo/team conventions | [Adding custom instructions for GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-custom-instructions) |
+| **MCP servers** | External tools and data sources exposed through Model Context Protocol. | Copilot to use external service tools and domain APIs | [Using GitHub Copilot CLI — Add an MCP server](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/use-copilot-cli#add-an-mcp-server) |
+| **Custom agents** | Specialized Copilot personas for specific task types. | Task-focused behavior (for example, security reviewer, frontend specialist) | [Using GitHub Copilot CLI — Use custom agents](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/use-copilot-cli#use-custom-agents) |
+| **Hooks** | Shell commands that run at key points in agent execution. | Guardrails, validation, automation, or logging around agent behavior | [About hooks for GitHub Copilot](https://docs.github.com/en/copilot/concepts/agents/hooks) |
+| **Skills** | Reusable task augmentations with instructions, scripts, and resources. | Repeatable workflows or domain capabilities you can invoke on demand | [About agent skills](https://docs.github.com/en/copilot/concepts/agents/about-agent-skills) |
+| **Copilot Memory** | Persistent memories about repo conventions, patterns, and preferences inferred over time. | Reduce repetitive prompting and improve session continuity | [About GitHub Copilot Memory](https://docs.github.com/en/copilot/concepts/agents/copilot-memory) |
+| **Plugins** | Installable functionality bundles for CLI (can include agents, skills, hooks, MCP config, and more). | Add capabilities quickly without manual setup | [GitHub Copilot plugins marketplace](https://github.com/github/copilot-plugins) |
+
+### Putting it together: choosing the right option
+
+Use this table when deciding which customization surface fits your requirement.
+
+| Requirement | Best option |
+|-------------|-------------|
+| I want Copilot to always follow our repository conventions. | **Custom instructions** |
+| I want a repeatable workflow I can invoke on demand. | **Skills** |
+| I want Copilot to answer questions and carry out work in my repository. | Copilot requests permission to use the appropriate **tools** |
+| I want guardrails, policy, or automation around tool use and session events. | **Hooks** |
+| I need Copilot to be able to use tools provided by an external service. | **MCP servers** |
+| When working on particular tasks, I want Copilot to operate as a specialist with a constrained toolset. | **Custom agent** |
+| I want Copilot to carry out a complex task on my behalf. | Copilot automatically uses **subagents** when appropriate |
+| I want to add a package of functionality to Copilot CLI without configuring it manually myself. | **Plugin** |
 
 ### Custom instructions — CLI paths
 
@@ -483,7 +606,7 @@ echo "Always prefer list comprehensions over map/filter in Python." > ~/.copilot
 **Step 2: Test the instruction**
 
 ```bash
-cd copilot-cli/app/
+cd app/
 copilot
 ```
 
@@ -497,7 +620,7 @@ At the prompt:
 
 Type `exit` to quit.
 
-> 📌 **Reminder:** See Lab 2 for authoring patterns (tone, formatting rules, edge-case handling). Lab 4 focuses on CLI-specific paths.
+> 📌 **Reminder:** See Lab 2 for authoring patterns (tone, formatting rules, edge-case handling). Lab 3 focuses on CLI-specific paths.
 
 ---
 
@@ -505,7 +628,7 @@ Type `exit` to quit.
 
 🛠️ **Hands-on**
 
-Custom agents in the CLI work similarly to VS Code (covered in Lab 3), but with one key difference: they're **user-level only** (no `.github/agents/` in the CLI).
+Custom agents in the CLI work similarly to VS Code, but with one key difference: they're **user-level only** (no `.github/agents/` in the CLI).
 
 **File location:** `~/.copilot/agents/`  
 **File extension:** `*.agent.md` (the `.agent` infix is **required** — files without it are ignored)
@@ -563,7 +686,7 @@ Always provide specific file paths and line numbers, plus an actionable fix per 
 **Step 2: Invoke the custom agent**
 
 ```bash
-cd copilot-cli/app/
+cd app/
 copilot
 ```
 
@@ -619,7 +742,7 @@ Hooks are a real CLI feature. They let you run scripts in response to CLI events
 
 **Disable globally:** Add `"disableAllHooks": true` to `~/.copilot/config.json`.
 
-> 📌 **Why read-through?** Hook event types are evolving and under-documented. Once you've identified an event type in your version of the CLI, the syntax above plugs in directly. Lab 4 keeps this as read-through to avoid shipping stale event names.
+> 📌 **Why read-through?** Hook event types are evolving and under-documented. Once you've identified an event type in your version of the CLI, the syntax above plugs in directly. Lab 3 keeps this as read-through to avoid shipping stale event names.
 
 ---
 
@@ -665,7 +788,7 @@ At the prompt:
 
 Type `exit` to quit.
 
-> 📌 **Reminder:** See Lab 2 for skill authoring (SKILL.md format, domain/description/examples). Lab 4 focuses on CLI-specific invocation.
+> 📌 **Reminder:** See Lab 2 for skill authoring (SKILL.md format, domain/description/examples). Lab 3 focuses on CLI-specific invocation.
 
 ---
 
@@ -799,7 +922,7 @@ Type `exit` to quit.
 
 📖 **Read-through**
 
-Model Context Protocol (MCP) servers (covered in Lab 3) work in the CLI, but with different config paths.
+Model Context Protocol (MCP) servers work in the CLI, but with different config paths.
 
 | Scope | Path |
 |-------|------|
@@ -823,7 +946,32 @@ Model Context Protocol (MCP) servers (covered in Lab 3) work in the CLI, but wit
 
 > ✅ **You should now see** (mentally): MCP servers work the same way in the CLI as in VS Code, but with different config-file paths. Locate `~/.copilot/mcp-config.json` and identify one configured server (if any exist).
 
-> 📌 **Reminder:** See Lab 3 for MCP server authoring (FastMCP in Python, server registration, tool exposure). Lab 4 focuses on CLI-specific config paths.
+> 📌 **Reminder:** MCP server authoring (FastMCP in Python, server registration, tool exposure) is covered in the MCP-focused lab material. Lab 3 focuses on CLI-specific config paths.
+
+---
+
+### Agent orchestration — hand off from local agent to Copilot CLI
+
+🛠️ **Hands-on**
+
+Use this workflow when you want to clarify requirements with a local VS Code agent first, then offload implementation to a Copilot CLI background session.
+
+**Step 1: Start with a local agent conversation**
+
+- Open Chat view and work with a local agent to refine scope, constraints, and acceptance criteria.
+- If you're using the Plan agent, iterate until the implementation plan is clear.
+
+**Step 2: Hand off to Copilot CLI**
+
+- In the Chat view, switch **Session Target** to **Copilot CLI**.
+- If you're in Plan agent flow, use **Start Implementation -> Continue in Copilot CLI**.
+
+**Step 3: Continue execution in the Copilot CLI session**
+
+- The Copilot CLI session starts with conversation context carried over from the local chat.
+- Track progress in Chat, answer questions, and approve actions as needed.
+
+> ✅ **You should now see:** A smooth planning-to-execution handoff where Copilot CLI continues from your local-agent context instead of starting from scratch.
 
 ---
 
@@ -838,7 +986,7 @@ The CLI's killer feature: headless invocation for CI/CD, PR reviews, and schedul
 **One-shot invocation:**
 
 ```bash
-cd copilot-cli/app/
+cd app/
 copilot -p "Generate tests for @backend/app.py"
 ```
 
@@ -871,7 +1019,7 @@ chmod +x review-script.sh
 **Step 2: Run the script**
 
 ```bash
-cd copilot-cli/app/
+cd app/
 ./review-script.sh
 ```
 
@@ -930,9 +1078,9 @@ Congratulations! You've mastered the GitHub Copilot CLI — from interactive ses
 | Prompt files (`.github/prompts/`) | Lab 2 |
 | Skills (authoring) | Lab 2 |
 | `AGENTS.md` | Lab 2 |
-| MCP server creation | Lab 3 |
-| VS Code custom agents (`.github/agents/`) | Lab 3 |
-| VS Code agent plugins | Lab 3 |
+| MCP server creation | MCP-focused lab material |
+| VS Code custom agents (`.github/agents/`) | MCP-focused lab material |
+| VS Code agent plugins | MCP-focused lab material |
 
 **Extensions to try:**
 
