@@ -153,6 +153,7 @@ These are the CLI-specific commands you can use in interactive mode. We'll explo
 - `/delegate` — send session to GitHub cloud agent → creates a PR
 - `/chronicle` — session insights (**EXPERIMENTAL** — requires `/experimental on`)
 - `/skills` — list/info/add/remove/reload skills
+- `/rename` — rename the current session
 
 **Context management:**
 - `/context` — show token usage and visualization
