@@ -14,7 +14,7 @@ document.addEventListener("DOMContentLoaded", () => {
       activitiesList.innerHTML = "";
 
       // Populate activities list
-      Object.entries(activities).forEach(([name, details]) => {
+      Object.entries(activities).forEach(([name, details], index) => {
         const activityCard = document.createElement("div");
         activityCard.className = "activity-card";
 
@@ -33,7 +33,7 @@ document.addEventListener("DOMContentLoaded", () => {
         participantsToggle.textContent = "View Participants";
 
         const participantsContainer = document.createElement("div");
-        const participantsId = `participants-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+        const participantsId = `participants-${index}-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
         participantsContainer.id = participantsId;
         participantsContainer.className = "participants-container hidden";
 
