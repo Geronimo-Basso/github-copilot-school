@@ -5,14 +5,28 @@ A super simple FastAPI application that allows students to view and sign up
 for extracurricular activities at GitHub Copilot High School.
 """
 
-from fastapi import FastAPI, HTTPException
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 import os
 from pathlib import Path
 
-app = FastAPI(title="GitHub Copilot High School API",
-              description="API for viewing and signing up for extracurricular activities")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifecycle - cleanup SDK client on shutdown."""
+    yield
+    # Shutdown: stop the Copilot client
+    from backend.assistant import stop_client
+    await stop_client()
+
+
+app = FastAPI(
+    title="GitHub Copilot High School API",
+    description="API for viewing and signing up for extracurricular activities",
+    lifespan=lifespan,
+)
 
 # Mount the static files directory (frontend)
 current_dir = Path(__file__).parent
@@ -65,3 +79,33 @@ def signup_for_activity(activity_name: str, email: str):
     # Add student
     activity["participants"].append(email)
     return {"message": f"Signed up {email} for {activity_name}"}
+
+
+@app.post("/assistant/stream")
+async def assistant_stream(request: Request):
+    """
+    Stream assistant responses via Server-Sent Events (SSE).
+    
+    Accepts JSON body with a "prompt" field and returns a text/event-stream
+    response with the assistant's answer streamed chunk by chunk.
+    """
+    from backend.assistant import stream_answer
+
+    body = await request.json()
+    prompt = body.get("prompt", "")
+
+    async def event_generator():
+        async for chunk in stream_answer(prompt):
+            # SSE format: data: <content>\n\n
+            yield f"data: {chunk}\n\n"
+        # Signal end of stream
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )

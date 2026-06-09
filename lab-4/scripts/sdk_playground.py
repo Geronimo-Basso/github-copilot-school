@@ -82,7 +82,7 @@ async def main() -> None:
 
         session.on(handle_event)
 
-        print("Type a message and press Enter. Type 'quit' to exit.\n")
+        print("Type a message and press Enter. h Type 'quit' to exit.\n")
         while True:
             try:
                 prompt = input("you> ").strip()
