@@ -19,7 +19,7 @@ header {
   text-align: center;
   padding: 20px 0;
   margin-bottom: 30px;
-  background: linear-gradient(135deg, #007c91, #b3472f);
+  background-color: #007c91;
   color: white;
   border-radius: 5px;
 }
@@ -68,7 +68,7 @@ section h3 {
 
 .activity-card h4 {
   margin-bottom: 10px;
-  color: #c74f36;
+  color: #ab4029;
 }
 
 .activity-card p {
