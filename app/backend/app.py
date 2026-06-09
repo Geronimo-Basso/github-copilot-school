@@ -5,9 +5,10 @@ A super simple FastAPI application that allows students to view and sign up
 for extracurricular activities at GitHub Copilot High School.
 """
 
+from html import escape
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 import os
 from pathlib import Path
 
@@ -42,6 +43,50 @@ activities = {
 }
 
 
+def get_open_spots(activity):
+    return max(activity["max_participants"] - len(activity["participants"]), 0)
+
+
+def render_activities_page():
+    activity_cards = []
+
+    for name, activity in activities.items():
+        activity_cards.append(
+            f"""
+            <article class="activity-card">
+              <h4>{escape(name)}</h4>
+              <p>{escape(activity["description"])}</p>
+              <p><strong>Schedule:</strong> {escape(activity["schedule"])}</p>
+              <p><strong>Spots open:</strong> {get_open_spots(activity)}</p>
+            </article>
+            """
+        )
+
+    return f"""
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>School Activities</title>
+        <link rel="stylesheet" href="/static/styles.css" />
+      </head>
+      <body>
+        <header>
+          <h1>GitHub Copilot High School</h1>
+          <h2>School Activities</h2>
+        </header>
+        <main>
+          <section style="max-width: 900px;">
+            <h3>Available Activities</h3>
+            {''.join(activity_cards)}
+          </section>
+        </main>
+      </body>
+    </html>
+    """
+
+
 @app.get("/")
 def root():
     return RedirectResponse(url="/static/index.html")
@@ -50,6 +95,11 @@ def root():
 @app.get("/activities")
 def get_activities():
     return activities
+
+
+@app.get("/activities/view", response_class=HTMLResponse)
+def activities_view():
+    return render_activities_page()
 
 
 @app.post("/activities/{activity_name}/signup")
