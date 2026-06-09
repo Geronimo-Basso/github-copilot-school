@@ -44,10 +44,12 @@ activities = {
 
 
 def get_open_spots(activity):
+    """Return the number of remaining spots for a single activity."""
     return max(activity["max_participants"] - len(activity["participants"]), 0)
 
 
 def render_activities_page():
+    """Render a plain HTML page listing every activity and its open spots."""
     activity_cards = []
 
     for name, activity in activities.items():
@@ -77,7 +79,7 @@ def render_activities_page():
           <h2>School Activities</h2>
         </header>
         <main>
-          <section style="max-width: 900px;">
+          <section class="activities-overview">
             <h3>Available Activities</h3>
             {''.join(activity_cards)}
           </section>
