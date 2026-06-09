@@ -23,7 +23,7 @@ document.addEventListener("DOMContentLoaded", () => {
       activitySelect.innerHTML = '<option value="">-- Select an activity --</option>';
 
       // Populate activities list
-      Object.entries(activities).forEach(([name, details]) => {
+      Object.entries(activities).forEach(([name, details], index) => {
         const activityCard = document.createElement("div");
         activityCard.className = "activity-card";
 
@@ -35,6 +35,47 @@ document.addEventListener("DOMContentLoaded", () => {
           <p><strong>Schedule:</strong> ${details.schedule}</p>
           <p><strong>Availability:</strong> ${spotsLeft} spots left</p>
         `;
+
+        const participantsToggle = document.createElement("button");
+        participantsToggle.type = "button";
+        participantsToggle.className = "participants-toggle";
+        participantsToggle.textContent = "View Participants";
+
+        const participantsContainer = document.createElement("div");
+        const participantsId = `participants-${index}-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+        participantsContainer.id = participantsId;
+        participantsContainer.className = "participants-container hidden";
+
+        participantsToggle.setAttribute("aria-expanded", "false");
+        participantsToggle.setAttribute("aria-controls", participantsId);
+
+        if (details.participants.length > 0) {
+          const participantsList = document.createElement("ul");
+          participantsList.className = "participants-list";
+
+          details.participants.forEach((participant) => {
+            const participantItem = document.createElement("li");
+            participantItem.textContent = participant;
+            participantsList.appendChild(participantItem);
+          });
+
+          participantsContainer.appendChild(participantsList);
+        } else {
+          const emptyState = document.createElement("p");
+          emptyState.className = "participants-empty";
+          emptyState.textContent = "No participants registered yet.";
+          participantsContainer.appendChild(emptyState);
+        }
+
+        participantsToggle.addEventListener("click", () => {
+          const isHidden = participantsContainer.classList.contains("hidden");
+          participantsContainer.classList.toggle("hidden");
+          participantsToggle.setAttribute("aria-expanded", String(isHidden));
+          participantsToggle.textContent = isHidden ? "Hide Participants" : "View Participants";
+        });
+
+        activityCard.appendChild(participantsToggle);
+        activityCard.appendChild(participantsContainer);
 
         activitiesList.appendChild(activityCard);
 
