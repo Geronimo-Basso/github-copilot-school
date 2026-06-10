@@ -760,6 +760,145 @@ Keep both drafts nearby. In the next phase you will either hand them to Copilot 
 
 ---
 
+### 3.4 Add a CI workflow that summarizes every change merged to `main`
+
+This workflow runs **every time something is pushed to `main`** — which, in practice, means every time one of your PRs gets merged. It reads the new commits, pulls out the associated **PR number** (from the merge commit) and any **issue numbers** (from `Fixes #N` / `Closes #N` / bare `#N` references), builds a diff, and uses **GitHub Models** to draft a natural-language summary into the workflow run's **Job Summary**.
+
+> **Important — where this file must live.** A `push` workflow only fires if the workflow file already exists *on the branch being pushed to*. Because the trigger is `branches: [main]`, the `branch-summary.yml` file has to be committed **directly to `main`**, not to your feature branch. If it only exists on `feature/sdk-assistant`, merging into `main` will **not** trigger it. So you'll commit this one file to `main` first, then immediately switch back to `feature/sdk-assistant` to continue all your normal work (PRs and issues are still raised from the feature branch).
+
+Ask Copilot to scaffold it, or create the file directly at `.github/workflows/branch-summary.yml`:
+
+```yaml
+name: Branch Change Summary
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  models: read          
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 1) Calcula el rango de commits y construye el diff una sola vez
+      - name: Compute range and build diff
+        id: diff
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+        run: |
+          if [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
+             && git rev-parse --verify --quiet "$BEFORE" >/dev/null; then
+            RANGE="$BEFORE..$AFTER"
+          else
+            RANGE="$AFTER"
+          fi
+          echo "range=$RANGE" >> "$GITHUB_OUTPUT"
+
+          # Guardamos el diff truncado para no exceder el límite de tokens del modelo
+          {
+            echo 'patch<<EOF'
+            git diff "$RANGE" | head -c 12000
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      # 2) Resumen en lenguaje natural con GitHub Models
+      - name: Summarize the changes with AI
+        id: ai
+        uses: actions/ai-inference@v1
+        with:
+          model: openai/gpt-4o
+          system-prompt: |
+            You are a senior engineer writing concise release notes.
+            Given a git diff, explain in clear prose: what changed,
+            why it likely matters, and any risks reviewers should check.
+            Use short paragraphs and bullet points. Do not repeat the diff.
+          prompt: ${{ steps.diff.outputs.patch }}
+
+      # 3) Escribe el Job Summary combinando todo
+      - name: Write job summary
+        env:
+          RANGE: ${{ steps.diff.outputs.range }}
+          AFTER: ${{ github.event.after }}
+        run: |
+          echo "## New changes on \`${GITHUB_REF_NAME}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          # --- PR number desde el merge commit, si existe ---
+          PR=$(git log -1 --pretty=%s "$AFTER" \
+               | grep -oiE 'Merge pull request #[0-9]+' \
+               | grep -oE '[0-9]+' || true)
+          if [ -n "$PR" ]; then
+            echo "- Merged pull request: **#$PR**" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # --- Issues referenciadas en los commits ---
+          ISSUES=$(git log "$RANGE" --pretty=%B \
+                   | grep -oiE '#[0-9]+' | grep -oE '[0-9]+' | sort -u || true)
+          if [ -n "$ISSUES" ]; then
+            echo "- Referenced issues:" >> "$GITHUB_STEP_SUMMARY"
+            for i in $ISSUES; do
+              echo "    - #$i" >> "$GITHUB_STEP_SUMMARY"
+            done
+          fi
+
+          # --- Resumen AI ---
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Summary of changes" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.ai.outputs.response }}" >> "$GITHUB_STEP_SUMMARY"
+
+          # --- Commits ---
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Commits" >> "$GITHUB_STEP_SUMMARY"
+          git log "$RANGE" --pretty='- %h %s (%an)' >> "$GITHUB_STEP_SUMMARY"
+
+          # --- Estadísticas por archivo ---
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Files changed" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          git diff --stat "$RANGE" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+```
+
+Because the trigger is `branches: [main]`, commit this single file **to `main`**, then switch straight back to your feature branch. Run the commands one block at a time:
+
+1. **Move to `main` and make sure it's current.** Stash or set aside any unrelated work first so you carry only the workflow file across.
+
+   ```powershell
+   git checkout main
+   git pull origin main
+   ```
+
+2. **Add only the workflow file, commit, and push it to `main`.**
+
+   ```powershell
+   git add .github/workflows/branch-summary.yml
+   git commit -m "ci: summarize pushes to main"
+   git push origin main
+   ```
+
+3. **Switch back to `feature/sdk-assistant`** — this is where the rest of your work, PRs, and issues happen. The workflow now lives on `main`, so it will fire on every future merge into `main`.
+
+   ```powershell
+   git checkout feature/sdk-assistant
+   ```
+
+> **Heads up:** if `branch-summary.yml` only exists on your feature branch, you'll need to `git checkout main -- .github/workflows/branch-summary.yml` (or recreate it on `main`) before step 2. The file *must* be committed on `main` for the `push` trigger to work.
+
+After a later PR is merged into `main`, open the **Actions** tab on GitHub, click the most recent **Branch Change Summary** run, and read its **Summary** — you should see the merged PR number, referenced issues, the AI-written change summary, the commits, and the changed files.
+
+> **Why Job Summary and not a PR comment?** Writing to `$GITHUB_STEP_SUMMARY` always works, needs no write permissions, and keeps the lab free of token setup. If you later want it to post on the PR instead, give the job `pull-requests: write` and pipe the same text through `gh pr comment`.
+
+
+
 ## 4. Phase C — Open the PR and create the follow-up issue
 
 This phase is about publishing the work, not memorizing `gh` syntax. Keep VS Code as the primary surface and let Copilot help with the GitHub artifacts.
@@ -813,13 +952,26 @@ GitHub Docs for the cloud agent workflow: https://docs.github.com/en/copilot/con
 > **UI review tip:** If the change is visual, ask Copilot to include screenshots in the PR or attach screenshots as visual context in the prompt. That makes the UI changes easier to review directly from the PR.
 
 
-4. If needed, add additional comments to refine the styling implementation:
+4. Wait for the Cloud Coding Agent to finish. It works asynchronously: it pushes commits to its own branch and opens a pull request when the first pass is ready. Do not act on the PR until the agent signals it is done, for this lab hold off on merging it before the code has been reviewed by Copilot Review.
+
+5. If needed, add additional comments to refine the styling implementation. Each comment kicks off another agent pass, so send your refinements **one round at a time** and wait for the agent to finish before the next one:
 
 ```text
 @copilot please refine the styling work. Tighten the color contrast, keep the layout readable on small screens, and make the summer palette feel cohesive across the page.
 ```
 
-5. Review the agent-created branch, commits, or PR before approving anything. Focus on scope control, accessibility, and whether the UI changes still match the acceptance criteria in the issue.
+6. **Request the Copilot reviewer once you are done refining.** When you are happy with the agent's changes and have no more `@copilot` comments pending, hand the PR to the reviewer:
+   - Open the PR on GitHub.
+   - In the right sidebar, under **Reviewers**, find **Copilot** and click **Request** (the button shown next to it).
+   - Wait for the review to complete — Copilot leaves inline comments and suggestions across the diff.
+
+   > **Why wait for all refinements first?** The reviewer evaluates the PR as it stands *now*. If you request it while the coding agent is still pushing changes, the review goes stale immediately. Finish the `@copilot` refinement rounds, then request the review on the final diff.
+
+7. Triage the review and the change before merging. Read every inline comment, accept the suggestions that improve the result, and reply to or dismiss the ones that don't. Focus your own check on scope control, accessibility, and whether the UI changes still match the acceptance criteria in the issue.
+
+8. **Merge the PR** only after you agree with the result and the review comments are resolved. Use **Squash and merge** (or your preferred strategy) to bring the styling work into `main`.
+
+   > **Merging triggers the Branch Change Summary workflow.** Because the PR merges into `main`, the GitHub Action you committed in Phase B (3.4) fires on that push. To see its output, open the **Actions** tab of the repository on GitHub, click the most recent **Branch Change Summary** run, and read the run's **Summary** section — you should see the merged PR number, any referenced issue numbers, the commits, and the changed files for the styling work.
 
 ### Optional follow-up: participant visibility issue
 
